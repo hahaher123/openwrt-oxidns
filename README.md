@@ -5,8 +5,7 @@
 **设计目标：与 [luci-app-oxidns](https://github.com/svenshi/luci-app-oxidns) 配合使用。** 本包只提供核心二进制与默认配置，**不提供**服务脚本和 UCI 配置——那两样由 `luci-app-oxidns` 提供。两个包的文件集**零重叠**，可以同时安装，不存在任何冲突：
 
 ```sh
-apk add oxidns luci-app-oxidns      # OpenWrt 25.12+（apk）
-opkg install oxidns luci-app-oxidns # OpenWrt 24.10（opkg）
+apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
 ```
 
 ---
@@ -54,7 +53,7 @@ opkg install oxidns luci-app-oxidns # OpenWrt 24.10（opkg）
 | `/etc/config/oxidns` | — | ✅ |
 | `/usr/share/oxidns/targets.json` | — | ✅ |
 
-**没有任何交集**，所以 `apk` / `opkg` 不会报文件冲突，两个包可以随时一起装、一起升：
+**没有任何交集**，所以 `apk` 不会报文件冲突，两个包可以随时一起装、一起升：
 
 ```sh
 apk add oxidns luci-app-oxidns
@@ -64,7 +63,7 @@ apk add oxidns luci-app-oxidns
 
 `scripts/validate.sh` 会把「包内是否出现 `luci-app-oxidns` 的文件路径」当成一项检查，将来误加文件会直接让 CI 失败。
 
-⚠️ 装完之后**不要**再用 LuCI `Services → OxiDNS → Core` 页面的 `Install Core` / `Remove Core`：那个页面直接读写 `/usr/bin/oxidns` 与 `/usr/share/oxidns/webui`，绕过包管理器，会让 apk/opkg 数据库与实际文件不一致。需要升级或更换核心时，升级 `oxidns` 包本身即可。
+⚠️ 装完之后**不要**再用 LuCI `Services → OxiDNS → Core` 页面的 `Install Core` / `Remove Core`：那个页面直接读写 `/usr/bin/oxidns` 与 `/usr/share/oxidns/webui`，绕过包管理器，会让 apk 数据库与实际文件不一致。需要升级或更换核心时，升级 `oxidns` 包本身即可。
 
 ---
 
@@ -72,8 +71,11 @@ apk add oxidns luci-app-oxidns
 
 ### 前置条件
 
-- OpenWrt **24.10 或 25.12**（Rust ≥ 1.85 才能编译 `edition = "2024"`；24.10 为 rust 1.94，25.12 为 rust 1.96）。
-  - **包格式跟着 OpenWrt 版本走**：24.10 用 **opkg**，产物是 `.ipk`，安装用 `opkg install`；25.12 起改用 **apk**，产物是 `.apk`，安装用 `apk add`。CI 默认构建 25.12，产出 `.apk`。
+- OpenWrt **25.12 或更新版本**，且 `feeds/packages/lang/rust` 必须是 **rust ≥ 1.95**。
+  - 原因：OxiDNS 依赖 `sysinfo 0.39`，其 `rust-version` 声明为 **1.95**（`edition = "2024"` 只要求 1.85，不是瓶颈）。
+  - 当前各分支的实际情况：`openwrt-25.12` = rust **1.96.0** ✅；`openwrt-24.10` = rust **1.94.0** ❌（**24.10 无法编译本包**）。
+  - ⚠️ **官方 Release SDK 的 feed 是钉死在发布时刻那个提交上的**。25.12.5 的 SDK 就落在 rust 1.96 升级之前（见 `feeds.conf.default` 里的 `^5caa62e0…`），直接用它只会拿到 rust 1.94 并在编译 `sysinfo` 时报错。`scripts/build-sdk.sh` 已自动把 packages feed 改指到对应 release 分支；自己手工搭环境时请先 `./scripts/feeds update packages` 或确认 `feeds/packages/lang/rust/Makefile` 里的 `PKG_VERSION`。
+  - 25.12 起包管理器是 **apk**，产物是 `.apk`，安装用 `apk add`。
 - 完整的 buildroot 或 SDK，已执行 `./scripts/feeds update -a && ./scripts/feeds install -a`（需要 `feeds/packages/lang/rust`）。
 - Linux x86_64 构建主机（或 WSL2）。
 - **磁盘 ≥ 40 GB，首次编译数小时**：`PKG_BUILD_DEPENDS:=rust/host` 会从源码构建 Rust 工具链（含 LLVM）。这是 OpenWrt Rust 包的固有代价，与 OxiDNS 无关。产物会缓存在 `build_dir/` 与 `dl/cargo`，后续增量编译很快。
@@ -90,12 +92,7 @@ make menuconfig     # Network -> IP Addresses and Names -> oxidns
 make -j$(nproc) package/feeds/oxidns/oxidns/compile V=s
 ```
 
-产物：
-
-| OpenWrt | 路径 | 安装命令 |
-| --- | --- | --- |
-| 25.12+ | `bin/packages/<arch>/oxidns/oxidns-<ver>-r<n>.apk` | `apk add ./oxidns-<ver>-r<n>.apk` |
-| 24.10 | `bin/packages/<arch>/oxidns/oxidns_<ver>-r<n>_<arch>.ipk` | `opkg install ./oxidns_*.ipk` |
+产物：`bin/packages/<arch>/oxidns/oxidns-<ver>-r<n>.apk`，安装用 `apk add ./oxidns-<ver>-r<n>.apk`。
 
 ### 方式二：直接放进 package/ 目录
 
@@ -111,7 +108,7 @@ make -j$(nproc) package/oxidns/compile V=s
 sh scripts/build-sdk.sh -t x86/64 -v 25.12.5 -o ./out
 ```
 
-脚本自动完成：下载并解压官方 SDK → 注册本地 feed → 拉取 `lang/rust` → 打开 `oxidns` → 编译 → 收集产物到 `./out`。常用参数：`-t` 目标（如 `armsr/armv8`、`ramips/mt7621`）、`-v` OpenWrt 版本、`-j` 并行度、`-w` 工作目录。
+脚本自动完成：下载并解压官方 SDK → 注册本地 feed → **把 packages feed 从 SDK 的钉死提交改指到 `openwrt-<版本>` 分支**（否则 rust 太旧，编译必然失败）→ 拉取 `lang/rust` 并**校验其版本 ≥ 1.95**（不满足会立刻退出，不用等到编译一小时后再失败）→ 打开 `oxidns` → 编译 → 收集产物到 `./out`。常用参数：`-t` 目标（如 `armsr/armv8`、`ramips/mt7621`）、`-v` OpenWrt 版本、`-j` 并行度、`-w` 工作目录；环境变量 `OXIDNS_PACKAGES_FEED` 可自行指定 feed（如换成某个具体提交）。
 
 CI 侧的 `.github/workflows/build.yml` 用的是同一套流程（手动触发，或被上游版本探测工作流调用）。
 
@@ -136,8 +133,7 @@ CI 侧的 `.github/workflows/build.yml` 用的是同一套流程（手动触发�
 ### 安装
 
 ```sh
-apk add oxidns luci-app-oxidns      # OpenWrt 25.12+（apk）
-opkg install oxidns luci-app-oxidns # OpenWrt 24.10（opkg）
+apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
 
 /etc/init.d/rpcd restart
 # 打开 LuCI：Services -> OxiDNS
@@ -204,7 +200,7 @@ logread -f | grep oxidns
 - 产物：`oxidns` 的 x86/64 `.apk`，发布在 Releases 页面。安装方式：`apk add oxidns luci-app-oxidns`。
 - 手工补跑：Actions → **upstream-watch** → *Run workflow*，勾选 `force` 可在上游没有新版时也重新编译并发布。
 
-> ⚠️ 编译耗时以小时计（要现场构建 Rust 工具链含 LLVM）。若遇到 GitHub Actions 时长上限，冷启动（无缓存）可能超时失败——此时重跑一次命中缓存即可。仅变更上游版本才会触发编译，「无更新」的日子不会消耗构建资源。
+> ⚠️ 编译耗时以小时计：冷启动要从源码构建 Rust 工具链（含 LLVM，约 90 分钟），再加上 OxiDNS 本体（约 600 个 crate，开了 LTO + `opt-level=z`）。GitHub 侧缓存了 SDK 归档与 rust host 工具链（`staging_dir/host`、`staging_dir/hostpkg`、`build_dir/target-*/host`、`dl`），命中后 rust 工具链直接复用。但缓存只在**整个作业成功**后才会保存——冷启动若因任何原因失败，下一次仍然是冷启动。仅变更上游版本才会触发编译，「无更新」的日子不消耗构建资源。
 
 ---
 
@@ -220,9 +216,10 @@ logread -f | grep oxidns
 ├── scripts/
 │   ├── validate.sh             # 仓库自检
 │   ├── sync-upstream.sh        # 跟进上游新版本（更新 PKG_VERSION/PKG_HASH）
-│   └── build-sdk.sh            # 用官方 SDK 构建
+│   ├── build-sdk.sh            # 用官方 SDK 构建
+│   └── test-build-sdk.sh       # build-sdk.sh 的离线回归测试（桩掉 curl/tar/make）
 └── .github/workflows/
-    ├── validate.yml            # 元数据 / 文件校验
+    ├── validate.yml            # 元数据 / 文件校验 + 回归测试
     ├── build.yml               # 可复用：手动或由上游探测调用，产出 .apk
     └── upstream-watch.yml      # 每 24h 探测上游 → 有新版本则编译并发布 Release
 ```
@@ -244,8 +241,9 @@ sh scripts/validate.sh               # 更新后校验
 ## 已知限制
 
 - 仅支持 OpenWrt 官方 Rust 包覆盖的架构（`aarch64 / arm / i386 / loongarch64 / mips / mips64 / mips64el / mipsel / powerpc / powerpc64 / riscv64 / x86_64`）。其它架构在 `menuconfig` 中不可见。
+- **需要 rust ≥ 1.95**（`sysinfo 0.39` 的 MSRV）。因此 **OpenWrt 24.10 及其更早版本无法编译本包**：`openwrt-24.10` 分支的 rust 是 1.94.0。23.05 及更早更低（1.85.0）。想在 24.10 上用只能自己打补丁降级 `sysinfo`，本仓库不支持。
+- **SDK 的 feed 钉死问题**：官方 Release SDK 的 `feeds.conf.default` 会把每个 feed 钉在发布时刻的提交上。25.12.5 的 SDK 钉的那个提交早于「rust: update to 1.96.0」，所以直接用它拿到的 rust 是 1.94，编译 `sysinfo` 时必然失败（报 `rustc 1.94.0 is not supported by the following package: sysinfo@0.39.6 requires rustc 1.95`）。`scripts/build-sdk.sh` 会自动改指到 release 分支；手工搭环境请先 `./scripts/feeds update packages`。
 - 首次编译时间与磁盘占用由 `lang/rust` 决定，无法通过本包规避。
-- 23.05 及更早版本：`lang/rust` 为 1.85.0，恰好是 `edition 2024` 的最低版本，**未经验证**，不建议使用。
 - 上游 tag 归档的字节内容由 GitHub 生成，若上游改变归档压缩方式，`PKG_HASH` 需要同步更新（`sync-upstream.sh` 会处理）。
 - 自动化工作流只产出 **x86/64** 的 `.apk`。其它架构请自行编译：`sh scripts/build-sdk.sh -t ramips/mt7621 -o ./out`。
 

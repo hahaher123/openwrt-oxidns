@@ -12,6 +12,11 @@ name: build
 #   rust package sets llvm.download-ci-llvm=false. Budget 3-6 hours and ~40 GB
 #   of disk on a 4-core runner. The caches below are what makes warm runs
 #   cheap; a cold cache-miss run may hit the 355 minute job limit.
+#
+#   OpenWrt 25.12 is required: OxiDNS depends on sysinfo 0.39 (rustc >= 1.95)
+#   and OpenWrt 24.10's rust is 1.94. build-sdk.sh also repoints feeds/packages
+#   from the SDK's pinned commit to the openwrt-25.12 branch, because the pin
+#   in the 25.12.5 SDK predates the rust 1.96 update.
 
 on:
   workflow_dispatch:
@@ -114,12 +119,16 @@ jobs:
         uses: actions/cache@v4
         continue-on-error: true
         with:
+          # build_dir/target-*/host holds the rust host package's .built stamp.
+          # Without it make rebuilds rustc + LLVM from source (~90 minutes);
+          # the previous key only covered staging_dir, which is not enough.
           path: |
-            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/build_dir/host
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/build_dir/target-*/host
             ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/host
             ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/hostpkg
             ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/toolchain-*
-          key: rust-host-${{ env.SDK_VERSION }}-${{ env.TARGET_ID }}-v1
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/dl
+          key: openwrt-host-${{ env.SDK_VERSION }}-${{ env.TARGET_ID }}-v2
 
       - name: Build packages
         run: |

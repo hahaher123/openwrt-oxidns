@@ -18,3 +18,9 @@ jobs:
 
       - name: Validate repository
         run: sh scripts/validate.sh
+
+      # Stubs curl/tar/make, so it is offline and takes a second. Guards the
+      # feed repointing and the rust version check that broke the first
+      # scheduled build.
+      - name: build-sdk.sh regression test
+        run: sh scripts/test-build-sdk.sh

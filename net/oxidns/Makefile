@@ -40,6 +40,11 @@ PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=openwrt-oxidns contributors <libiegou2025@gmail.com>
 
 # The Rust host toolchain is built by feeds/packages/lang/rust.
+#
+# It must be rust >= 1.95: sysinfo 0.39 (pulled in by the upstream Cargo.lock)
+# declares rust-version = "1.95". openwrt-25.12 ships 1.96, openwrt-24.10 only
+# 1.94, and release SDKs pin feeds/packages to an older commit still carrying
+# 1.94 - see the "Known limitations" section of README.md.
 PKG_BUILD_DEPENDS:=rust/host
 PKG_BUILD_PARALLEL:=1
 PKG_BUILD_FLAGS:=no-mips16

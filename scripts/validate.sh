@@ -110,6 +110,9 @@ for f in \
 	"$MAKE" \
 	"$PKG_DIR/Config.in" \
 	"$PKG_DIR/files/oxidns.yaml" \
+	"scripts/build-sdk.sh" \
+	"scripts/sync-upstream.sh" \
+	"scripts/test-build-sdk.sh" \
 	"LICENSE" \
 	"README.md"
 do
@@ -260,7 +263,9 @@ fi
 
 section "file syntax"
 
-for f in scripts/validate.sh scripts/build-sdk.sh scripts/sync-upstream.sh; do
+for f in scripts/validate.sh scripts/build-sdk.sh scripts/sync-upstream.sh \
+	scripts/test-build-sdk.sh
+do
 	if [ -f "$f" ]; then
 		if sh -n "$f" 2>"$WORK/sh.err"; then
 			ok "shell syntax: $f"
