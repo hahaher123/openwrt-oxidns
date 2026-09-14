@@ -1,0 +1,174 @@
+name: upstream-watch
+
+# Every 24 hours: probe https://github.com/svenshi/oxidns for a new release.
+# If the upstream version is newer than PKG_VERSION in net/oxidns/Makefile, this
+# workflow bumps the package, commits the bump, rebuilds the x86/64 packages and
+# publishes them as a GitHub Release.
+#
+# The probe itself is cheap (two HTTP requests), so a "nothing changed" day
+# costs seconds. Only `changed == true` starts the expensive build.
+
+on:
+  schedule:
+    # 02:23 UTC == 10:23 Asia/Shanghai, every day.
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: OpenWrt release to build against
+        required: true
+        default: '25.12.5'
+      force:
+        description: 'Build and publish even if upstream has no new version'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+# Never let two probes race on net/oxidns/Makefile.
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: probe upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.bump.outputs.changed }}
+      version: ${{ steps.bump.outputs.version }}
+      previous: ${{ steps.bump.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Probe upstream and bump the package
+        id: bump
+        run: |
+          set -eu
+          MAKE=net/oxidns/Makefile
+
+          previous="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
+          sh scripts/sync-upstream.sh
+          version="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
+
+          echo "upstream=$version  local=$previous"
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+          if [ "$version" != "$previous" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit the version bump
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -eu
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add net/oxidns/Makefile
+          git commit -m "oxidns: update to ${VERSION}"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Summary
+        run: |
+          {
+            echo '### Upstream probe'
+            echo ''
+            echo '| | |'
+            echo '|---|---|'
+            echo "| upstream | ${{ steps.bump.outputs.version }} |"
+            echo "| local before | ${{ steps.bump.outputs.previous }} |"
+            echo "| changed | ${{ steps.bump.outputs.changed }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build x86/64
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/build.yml
+    with:
+      sdk_version: ${{ inputs.sdk_version || '25.12.5' }}
+      targets: '["x86/64"]'
+
+  publish:
+    name: publish release
+    needs: [ check, build ]
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      # gh derives the target repository from the git remote.
+      - uses: actions/checkout@v5
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Check packages
+        run: |
+          set -eu
+          find dist -type f -printf '%p  %s bytes\n' | sort
+          count="$(find dist -type f -name '*.apk' | wc -l)"
+          echo "apk count: $count"
+          [ "$count" -gt 0 ] || { echo 'no .apk produced - nothing to publish' >&2; exit 1; }
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -eu
+          tag="v$VERSION"
+
+          # Quoted heredoc: keep the markdown backticks literal, inject the
+          # version afterwards instead.
+          cat > notes.md <<'NOTES'
+          OxiDNS **__VERSION__** compiled from source inside the OpenWrt build
+          system (SDK 25.12.5, target `x86/64`, `apk` packages).
+
+          | package | contents |
+          |---|---|
+          | `oxidns` | `/usr/bin/oxidns`, `/etc/oxidns/config.yaml`, `/usr/share/oxidns/webui/` |
+          | `oxidns-service` | procd init script + UCI config (CLI deployment) |
+
+          Upstream source: https://github.com/svenshi/oxidns/releases/tag/v__VERSION__
+
+          > `oxidns-service` ships the same two files as
+          > [luci-app-oxidns](https://github.com/svenshi/luci-app-oxidns).
+          > Install **either** `oxidns + oxidns-service` **or**
+          > `oxidns + luci-app-oxidns`, never both.
+
+          > This build is unofficial. It is not produced, endorsed or supported
+          > by the OxiDNS project; it exists only to make OxiDNS installable on
+          > OpenWrt.
+          NOTES
+          sed -i "s/__VERSION__/$VERSION/g" notes.md
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists - uploading assets"
+            gh release upload "$tag" dist/*.apk --clobber
+          else
+            gh release create "$tag" dist/*.apk \
+              --title "OxiDNS $VERSION (OpenWrt x86/64)" \
+              --notes-file notes.md
+          fi
+
+          gh release view "$tag" --json url,tagName,assets \
+            --jq '.url, .tagName, (.assets[] | "  " + .name + "  " + (.size | tostring) + " bytes")'

@@ -1,0 +1,60 @@
+# OxiDNS default configuration
+#
+# Derived from the upstream default configuration:
+#   https://github.com/svenshi/oxidns/blob/main/config.yaml
+# Only the WebUI path was adapted for the OpenWrt package layout.
+#
+# Full documentation: https://oxidns.org
+#
+# This file is registered as a conffile: package upgrades will not overwrite
+# your local changes. Delete it before reinstalling to restore the defaults.
+
+log:
+  level: info
+
+# Management API (optional)
+api:
+  http:
+    listen: ":9199"
+    # auth:
+    #   type: basic
+    #   username: admin
+    #   password: secret
+    # Optional static WebUI directory. Relative paths resolve from -d/--working-dir.
+    # The OpenWrt package uses -d /var/lib/oxidns and installs the WebUI assets
+    # (when present) into /usr/share/oxidns/webui.
+    # API routes are served under /api/*.
+    webui:
+      root: "/usr/share/oxidns/webui"
+
+plugins:
+  # Forward to upstream DNS servers
+  - tag: forward
+    type: forward
+    args:
+      upstreams:
+        - addr: "223.5.5.5"
+
+  - tag: main_sequence
+    type: sequence
+    args:
+      - exec: $forward
+      - exec: accept
+
+  # UDP server listening on :5335
+  #
+  # :5335 keeps the default configuration compatible with an existing
+  # dnsmasq / odhcpd setup on port 53. Move the listeners to ":53" once
+  # OxiDNS is meant to be the primary resolver on this device.
+  - tag: udp_server
+    type: udp_server
+    args:
+      entry: main_sequence
+      listen: ":5335"
+
+  # TCP server listening on :5335
+  - tag: tcp_server
+    type: tcp_server
+    args:
+      entry: main_sequence
+      listen: ":5335"

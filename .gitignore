@@ -1,0 +1,20 @@
+# Build artefacts
+*.ipk
+*.apk
+*.tar.gz
+*.tar.zst
+
+# Local OpenWrt build tree / SDK
+/sdk/
+/build/
+/bin/
+/dl/
+/tmp/
+/.sdk/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

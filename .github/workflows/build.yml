@@ -1,0 +1,146 @@
+name: build
+
+# Builds the OxiDNS OpenWrt packages (x86/64 -> .apk) from source.
+#
+# Callers:
+#   * .github/workflows/upstream-watch.yml  - daily upstream probe, auto build
+#   * Actions UI -> "build" -> Run workflow - manual
+#
+# RUNTIME WARNING
+#   A cold build has to compile the Rust host toolchain
+#   (feeds/packages/lang/rust: rustc + LLVM from source), because the OpenWrt
+#   rust package sets llvm.download-ci-llvm=false. Budget 3-6 hours and ~40 GB
+#   of disk on a 4-core runner. The caches below are what makes warm runs
+#   cheap; a cold cache-miss run may hit the 355 minute job limit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: OpenWrt release to build against
+        required: true
+        default: '25.12.5'
+      targets:
+        description: 'JSON array of target/subtarget pairs'
+        required: true
+        default: '["x86/64"]'
+  workflow_call:
+    inputs:
+      sdk_version:
+        description: OpenWrt release to build against
+        type: string
+        required: false
+        default: '25.12.5'
+      targets:
+        description: 'JSON array of target/subtarget pairs'
+        type: string
+        required: false
+        default: '["x86/64"]'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.targets || '["x86/64"]') }}
+
+    env:
+      SDK_VERSION: ${{ inputs.sdk_version || '25.12.5' }}
+      # "/" is not allowed in artifact names.
+      TARGET_ID: ${{ replace(matrix.target, '/', '-') }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Free disk space
+        run: |
+          set -eu
+          df -h /
+          sudo rm -rf \
+            /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/local/share/chromium /opt/google/chrome \
+            /usr/local/lib/node_modules /usr/lib/jvm 2>/dev/null || true
+          sudo apt-get purge -y -qq '^mysql-.*' '^postgresql-.*' '^dotnet-.*' 2>/dev/null || true
+          df -h /
+
+      - name: Add swap
+        run: |
+          set -eu
+          # Linking rustc / LLVM on a 16 GB runner can OOM. /mnt is the big volume.
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap -q /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd build-essential libncurses-dev rsync file
+
+      - name: Prepare work directory
+        run: |
+          set -eu
+          work=/mnt/openwrt-oxidns
+          if ! mkdir -p "$work" 2>/dev/null; then
+            sudo mkdir -p "$work"
+            sudo chown "$(id -u):$(id -g)" "$work"
+          fi
+          echo "OXIDNS_WORKDIR=$work" >> "$GITHUB_ENV"
+          df -h "$work"
+
+      - name: Cache SDK archive
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-${{ env.SDK_VERSION }}-${{ env.TARGET_ID }}*.tar.zst
+          key: sdk-archive-${{ env.SDK_VERSION }}-${{ env.TARGET_ID }}
+
+      - name: Restore host toolchain
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: |
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/build_dir/host
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/host
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/hostpkg
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/toolchain-*
+          key: rust-host-${{ env.SDK_VERSION }}-${{ env.TARGET_ID }}-v1
+
+      - name: Build packages
+        run: |
+          sh scripts/build-sdk.sh \
+            -t '${{ matrix.target }}' \
+            -v "$SDK_VERSION" \
+            -j "$(nproc)" \
+            -o "$GITHUB_WORKSPACE/out"
+
+      - name: Collect output
+        if: always()
+        run: |
+          set -eu
+          ls -l out 2>/dev/null || true
+          {
+            echo '### Generated packages'
+            echo '```'
+            ls -l out 2>/dev/null || echo '(none)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ env.SDK_VERSION }}-${{ env.TARGET_ID }}-packages
+          path: |
+            out/*.apk
+            out/*.ipk
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,38 @@
+choice
+	prompt "OxiDNS compile-time feature bundle"
+
+	default OXIDNS_BUNDLE_FULL
+
+config OXIDNS_BUNDLE_MINIMAL
+	bool "minimal"
+	help
+	  Minimal core DNS forwarder: UDP + TCP listeners, UDP + TCP upstream,
+	  sequence / forward / cache / fallback / hosts / redirect /
+	  dual_selector / ecs_handler / ttl / drop_resp / black_hole /
+	  debug_print / reload, all matchers and the domain_set + ip_set
+	  providers.
+
+	  Nothing else is compiled: no management API, no WebUI, no encrypted
+	  DNS protocols, no SQLite query recorder, no ipset / nftset.
+
+config OXIDNS_BUNDLE_STANDARD
+	bool "standard"
+	help
+	  Typical home / router build: management API + WebUI + Prometheus
+	  metrics, DoT / DoH / DoQ (server and client), common providers and
+	  the leaf executor plugins most configurations reach for.
+
+	  Still excludes MikroTik RouterOS integration, ipset / nftset and
+	  the HTTP/3 legs.
+
+config OXIDNS_BUNDLE_FULL
+	bool "full"
+	help
+	  Everything upstream compiles: standard plus HTTP/3 (DoH3), the
+	  MikroTik RouterOS executors and ipset / nftset.
+
+	  This is the bundle used by the official OxiDNS release archives and
+	  what luci-app-oxidns expects by default. Pick it unless the router is
+	  very tight on flash or RAM.
+
+endchoice
