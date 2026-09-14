@@ -53,11 +53,17 @@ jobs:
 
     env:
       SDK_VERSION: ${{ inputs.sdk_version || '25.12.5' }}
-      # "/" is not allowed in artifact names.
-      TARGET_ID: ${{ replace(matrix.target, '/', '-') }}
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Resolve target id
+        run: |
+          # GitHub expressions have no replace(), so turn "x86/64" into
+          # "x86-64" (a "/" is not allowed in artifact names) here.
+          id="$(printf '%s' '${{ matrix.target }}' | tr '/' '-')"
+          echo "TARGET_ID=$id" >> "$GITHUB_ENV"
+          echo "target: ${{ matrix.target }} -> id: $id" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Free disk space
         run: |
