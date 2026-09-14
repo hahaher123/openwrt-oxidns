@@ -4,9 +4,10 @@
 # Static validation for the openwrt-oxidns repository.
 #
 # Runs without an OpenWrt tree, so it can be used in CI and locally. It checks
-# the package metadata, the delivered file set, shell/UCI/YAML syntax and - if
-# the network is reachable - that PKG_HASH and PKG_VERSION still match the
-# upstream OxiDNS release.
+# the package metadata, the delivered file set, that nothing in the package
+# collides with luci-app-oxidns, shell/YAML syntax and - if the network is
+# reachable - that PKG_HASH and PKG_VERSION still match the upstream OxiDNS
+# release.
 #
 # Usage:
 #   sh scripts/validate.sh              # full check (needs network)
@@ -23,6 +24,10 @@ OFFLINE="${OXIDNS_OFFLINE:-0}"
 PROXY="${OXIDNS_PROXY:-}"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-validate.XXXXXX")"
+# mktemp may hand back a Windows-style path (C:\...) when TMPDIR is a Windows
+# path; GNU tar would read that as a remote "host:file" spec. cd+pwd normalises
+# it to a shell path.
+WORK="$(cd "$WORK" && pwd)"
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
 failures=0
@@ -69,18 +74,32 @@ sha256_of() {
 
 fetch() {
 	# fetch <url> <dest>
-	if command -v curl >/dev/null 2>&1; then
-		if [ -n "$PROXY" ]; then
-			curl -fsSL -x "$PROXY" -o "$2" "$1"
+	#
+	# Runs in a subshell that cd's into the destination directory and downloads
+	# to "./<name>". That keeps the path relative, which matters when the only
+	# curl around is the Windows one (it understands C:\... but not MSYS
+	# /c/... paths) while tar wants the opposite.
+	dir="$(dirname "$2")"
+	base="$(basename "$2")"
+	(
+		cd "$dir" || exit 1
+		if command -v curl >/dev/null 2>&1; then
+			if [ -n "$PROXY" ]; then
+				curl -fsSL -x "$PROXY" -o "./$base" "$1"
+			else
+				curl -fsSL -o "./$base" "$1"
+			fi
+		elif command -v wget >/dev/null 2>&1; then
+			if [ -n "$PROXY" ]; then
+				http_proxy="$PROXY" https_proxy="$PROXY" wget -q -O "./$base" "$1"
+			else
+				wget -q -O "./$base" "$1"
+			fi
 		else
-			curl -fsSL -o "$2" "$1"
+			echo "no curl/wget available" >&2
+			exit 1
 		fi
-	elif command -v wget >/dev/null 2>&1; then
-		wget -q -O "$2" "$1"
-	else
-		echo "no curl/wget available" >&2
-		return 1
-	fi
+	)
 }
 
 # --- 1. required files --------------------------------------------------------
@@ -91,8 +110,6 @@ for f in \
 	"$MAKE" \
 	"$PKG_DIR/Config.in" \
 	"$PKG_DIR/files/oxidns.yaml" \
-	"$PKG_DIR/files/oxidns.config" \
-	"$PKG_DIR/files/oxidns.init" \
 	"LICENSE" \
 	"README.md"
 do
@@ -190,26 +207,60 @@ else
 	fail "invalid package name(s): $bad"
 fi
 
-# UCI section/option names must be A-Za-z0-9_ (a "-" breaks parsing entirely).
-uci_names="$(
-	sed -n -e 's/^[[:space:]]*config[[:space:]]\+\([^[:space:]]*\).*/\1/p' \
-	       -e 's/^[[:space:]]*option[[:space:]]\+\([^[:space:]]*\).*/\1/p' \
-	       -e 's/^[[:space:]]*list[[:space:]]\+\([^[:space:]]*\).*/\1/p' \
-	       -e 's/^[[:space:]]*config[[:space:]]\+[^[:space:]]\+[[:space:]]\+\([^[:space:]]*\).*/\1/p' \
-		"$PKG_DIR/files/oxidns.config" | tr -d "'\""
-)"
-bad="$(printf '%s\n' "$uci_names" | grep -v '^[A-Za-z0-9_]\+$' || true)"
-if [ -z "$bad" ] && [ -n "$uci_names" ]; then
-	ok "UCI sections/options use only [A-Za-z0-9_]"
+# --- 4b. co-installation with luci-app-oxidns ---------------------------------
+#
+# The whole point of this package is to be installed *next to* luci-app-oxidns,
+# which owns these paths. If any of them ever ends up in the package's install
+# sections, apk would refuse the co-installation. See README.md.
+#
+# Comments are stripped first: this Makefile *mentions* those paths on purpose,
+# to explain why it does not ship them.
+body="$(grep -v '^[[:space:]]*#' "$MAKE")"
+
+LUCI_PATHS="/etc/init.d/oxidns /etc/config/oxidns /usr/share/oxidns/targets.json"
+collide=""
+for p in $LUCI_PATHS; do
+	if printf '%s\n' "$body" | grep -qF "$p"; then
+		collide="$collide $p"
+	fi
+done
+if [ -z "$collide" ]; then
+	ok "package does not claim any luci-app-oxidns path"
 else
-	fail "invalid or missing UCI names: $(printf '%s' "$bad" | tr '\n' ' ')"
+	fail "package claims luci-app-oxidns path(s):$collide"
+fi
+
+if printf '%s\n' "$body" | grep -q '^CONFLICTS'; then
+	fail "CONFLICTS is declared; the package must be co-installable with luci-app-oxidns"
+else
+	ok "no CONFLICTS declaration"
+fi
+
+# Every path the package installs must be listed in README.md, so the docs and
+# the Makefile cannot drift apart.
+installed="$(sed -n 's|.*\$(1)\(/[A-Za-z0-9._/-]*\).*|\1|p' "$MAKE" | sort -u)"
+if [ -z "$installed" ]; then
+	fail "could not derive installed paths from the Makefile"
+else
+	for p in $installed; do
+		case "$p" in
+			/usr/bin|/etc/oxidns|/usr/share/oxidns) ok "install dir documented: $p" ;;
+			*)
+				if grep -qF "$p" README.md; then
+					ok "installed path documented: $p"
+				else
+					fail "installed path not mentioned in README.md: $p"
+				fi
+				;;
+		esac
+	done
 fi
 
 # --- 5. file syntax -----------------------------------------------------------
 
 section "file syntax"
 
-for f in "$PKG_DIR/files/oxidns.init" scripts/validate.sh; do
+for f in scripts/validate.sh scripts/build-sdk.sh scripts/sync-upstream.sh; do
 	if [ -f "$f" ]; then
 		if sh -n "$f" 2>"$WORK/sh.err"; then
 			ok "shell syntax: $f"
@@ -218,18 +269,6 @@ for f in "$PKG_DIR/files/oxidns.init" scripts/validate.sh; do
 		fi
 	fi
 done
-
-if grep -q '#!/bin/sh /etc/rc.common' "$PKG_DIR/files/oxidns.init"; then
-	ok "init script uses the OpenWrt rc.common shebang"
-else
-	fail "init script shebang is not #!/bin/sh /etc/rc.common"
-fi
-
-if grep -q 'USE_PROCD=1' "$PKG_DIR/files/oxidns.init"; then
-	ok "init script is a procd service"
-else
-	fail "init script does not set USE_PROCD=1"
-fi
 
 # YAML forbids tab indentation.
 if grep -q "$(printf '\t')" "$PKG_DIR/files/oxidns.yaml"; then
@@ -250,7 +289,6 @@ section "line endings"
 
 crlf=""
 for f in "$MAKE" "$PKG_DIR/Config.in" "$PKG_DIR/files/oxidns.yaml" \
-	"$PKG_DIR/files/oxidns.config" "$PKG_DIR/files/oxidns.init" \
 	scripts/validate.sh .gitattributes
 do
 	[ -f "$f" ] || continue

@@ -141,19 +141,24 @@ jobs:
           # version afterwards instead.
           cat > notes.md <<'NOTES'
           OxiDNS **__VERSION__** compiled from source inside the OpenWrt build
-          system (SDK 25.12.5, target `x86/64`, `apk` packages).
+          system. Target `x86/64`, OpenWrt 25.12 (SDK 25.12.5), `apk` packages.
 
           | package | contents |
           |---|---|
           | `oxidns` | `/usr/bin/oxidns`, `/etc/oxidns/config.yaml`, `/usr/share/oxidns/webui/` |
-          | `oxidns-service` | procd init script + UCI config (CLI deployment) |
+
+          Install together with the LuCI app, which provides the procd service,
+          the UCI configuration and the web interface:
+
+          ```
+          apk add oxidns luci-app-oxidns
+          /etc/init.d/rpcd restart
+          ```
 
           Upstream source: https://github.com/svenshi/oxidns/releases/tag/v__VERSION__
 
-          > `oxidns-service` ships the same two files as
-          > [luci-app-oxidns](https://github.com/svenshi/luci-app-oxidns).
-          > Install **either** `oxidns + oxidns-service` **or**
-          > `oxidns + luci-app-oxidns`, never both.
+          This package ships nothing that `luci-app-oxidns` also ships, so the
+          two install side by side without file conflicts.
 
           > This build is unofficial. It is not produced, endorsed or supported
           > by the OxiDNS project; it exists only to make OxiDNS installable on

@@ -1,8 +1,13 @@
 # openwrt-oxidns
 
-[OxiDNS](https://github.com/svenshi/oxidns) 的 OpenWrt 打包仓库：在 OpenWrt 构建系统（buildroot / SDK）中**从源码交叉编译**出 `oxidns` 核心二进制，并生成可安装的 OpenWrt 软件包。
+[OxiDNS](https://github.com/svenshi/oxidns) 的 OpenWrt 打包仓库：在 OpenWrt 构建系统（buildroot / SDK）中**从源码交叉编译**出 `oxidns` 核心二进制，产出 OpenWrt 软件包。
 
-配合 [luci-app-oxidns](https://github.com/svenshi/luci-app-oxidns) 使用，也支持纯命令行（procd + UCI）部署。
+**设计目标：与 [luci-app-oxidns](https://github.com/svenshi/luci-app-oxidns) 配合使用。** 本包只提供核心二进制与默认配置，**不提供**服务脚本和 UCI 配置——那两样由 `luci-app-oxidns` 提供。两个包的文件集**零重叠**，可以同时安装，不存在任何冲突：
+
+```sh
+apk add oxidns luci-app-oxidns      # OpenWrt 25.12+（apk）
+opkg install oxidns luci-app-oxidns # OpenWrt 24.10（opkg）
+```
 
 ---
 
@@ -18,9 +23,9 @@
 **用途声明**
 
 1. 本仓库**仅用于在 OpenWrt 环境下编译 OxiDNS**。它只包含打包描述（Makefile / OpenWrt 配置）与仓库自检脚本。
-2. 本仓库**不重新分发** OxiDNS 源码或任何二进制。构建时由 OpenWrt 构建系统按 `PKG_SOURCE_URL` + `PKG_HASH` 自行下载并校验上游 tag 归档。因此本仓库不是上游的发行渠道，也不提供预编译安装包。
-4. 本仓库是**非官方**的第三方打包，与上游 OxiDNS 项目无隶属关系，未获其背书。OxiDNS 本体的功能、配置语义与问题反馈请以上游为准。
-5. 需要非 OpenWrt 平台（Linux 通用发行版 / macOS / Windows）的安装方式时，请使用上游官方安装脚本与 Release，不要使用本仓库。
+2. 本仓库**不重新分发** OxiDNS 源码。构建时由 OpenWrt 构建系统按 `PKG_SOURCE_URL` + `PKG_HASH` 自行下载并校验上游 tag 归档。CI 发布的 `.apk` 是本仓库用官方 SDK 现场编译的产物（**不是**上游二进制），只作为便利渠道；上游发行请以 `svenshi/oxidns` 的 Release 为准。
+3. 本仓库是**非官方**的第三方打包，与上游 OxiDNS 项目无隶属关系，未获其背书。OxiDNS 本体的功能、配置语义与问题反馈请以上游为准。
+4. 需要非 OpenWrt 平台（Linux 通用发行版 / macOS / Windows）的安装方式时，请使用上游官方安装脚本与 Release，不要使用本仓库。
 
 ---
 
@@ -28,27 +33,38 @@
 
 | 包名 | 安装内容 | 说明 |
 | --- | --- | --- |
-| `oxidns` | `/usr/bin/oxidns`<br>`/etc/oxidns/config.yaml`（conffile）<br>`/usr/share/oxidns/webui/`（空目录） | 核心二进制与默认配置，与上游 Release 归档、`luci-app-oxidns` 使用的路径一致 |
-| `oxidns-service` | `/etc/init.d/oxidns`（procd）<br>`/etc/config/oxidns`（conffile） | 纯命令行部署用的服务脚本与 UCI 配置 |
+| `oxidns` | `/usr/bin/oxidns`<br>`/etc/oxidns/config.yaml`（conffile）<br>`/usr/share/oxidns/webui/`（目录，放 WebUI 前端产物） | 核心二进制与默认配置，路径与上游 Release 归档、`luci-app-oxidns` 完全一致 |
 
-> `oxidns-service` 与 `luci-app-oxidns` 提供**同名文件**，因此二者互斥（`CONFLICTS`）。
+本仓库**只产出一个包**：`oxidns`。要完整跑起来还需要 `luci-app-oxidns`（见下）。
 
 ---
 
 ## 与 luci-app-oxidns 的配合
 
-`luci-app-oxidns` 本身**不包含** OxiDNS 核心（其 `LUCI_DEPENDS` 里没有 `oxidns`）。它默认从上游 GitHub Releases 下载 musl 归档并安装到 `/usr/bin/oxidns`。本仓库提供的是同一个位置的、由 OpenWrt 构建系统自行编译的替代品。
+`luci-app-oxidns` 本身**不包含** OxiDNS 核心（它的 `LUCI_DEPENDS` 里没有 `oxidns`），默认从上游 GitHub Releases 下载 musl 归档安装到 `/usr/bin/oxidns`；它提供的是 procd 服务、UCI 配置和 LuCI 页面。本仓库提供的是同一个位置的、由 OpenWrt 构建系统自行编译的核心，用来替换那个从网上下载的二进制。
 
-两种组合方式：
+两个包各自负责的文件：
 
-| 组合 | 安装命令 | 适用场景 |
-| --- | --- | --- |
-| **LuCI 管理**（推荐） | `opkg install oxidns luci-app-oxidns` | 用 LuCI 页面管理服务、编辑配置、看日志 |
-| **纯命令行** | `opkg install oxidns oxidns-service` | 无 LuCI 的精简固件，只用 UCI + `/etc/init.d/oxidns` |
+| 路径 | `oxidns`（本仓库） | `luci-app-oxidns` |
+| --- | :---: | :---: |
+| `/usr/bin/oxidns` | ✅ | — |
+| `/etc/oxidns/config.yaml` | ✅ | — |
+| `/usr/share/oxidns/webui/` | ✅（空目录） | — |
+| `/etc/init.d/oxidns` | — | ✅ |
+| `/etc/config/oxidns` | — | ✅ |
+| `/usr/share/oxidns/targets.json` | — | ✅ |
 
-⚠️ **不要同时安装** `oxidns-service` 和 `luci-app-oxidns`：两者都会提供 `/etc/init.d/oxidns` 与 `/etc/config/oxidns`，包管理器会报文件冲突。
+**没有任何交集**，所以 `apk` / `opkg` 不会报文件冲突，两个包可以随时一起装、一起升：
 
-⚠️ 核心由包管理器安装后，建议**不要**再使用 LuCI 的 `Services → OxiDNS → Core` 页面的 `Install Core` / `Remove Core`：该页面直接读写 `/usr/bin/oxidns` 与 `/usr/share/oxidns/webui`，绕过包管理器，会导致 opkg/apk 数据库与实际文件不一致。需要升级核心时请升级 `oxidns` 包本身。
+```sh
+apk add oxidns luci-app-oxidns
+/etc/init.d/rpcd restart
+# 打开 LuCI：Services -> OxiDNS
+```
+
+`scripts/validate.sh` 会把「包内是否出现 `luci-app-oxidns` 的文件路径」当成一项检查，将来误加文件会直接让 CI 失败。
+
+⚠️ 装完之后**不要**再用 LuCI `Services → OxiDNS → Core` 页面的 `Install Core` / `Remove Core`：那个页面直接读写 `/usr/bin/oxidns` 与 `/usr/share/oxidns/webui`，绕过包管理器，会让 apk/opkg 数据库与实际文件不一致。需要升级或更换核心时，升级 `oxidns` 包本身即可。
 
 ---
 
@@ -57,6 +73,7 @@
 ### 前置条件
 
 - OpenWrt **24.10 或 25.12**（Rust ≥ 1.85 才能编译 `edition = "2024"`；24.10 为 rust 1.94，25.12 为 rust 1.96）。
+  - **包格式跟着 OpenWrt 版本走**：24.10 用 **opkg**，产物是 `.ipk`，安装用 `opkg install`；25.12 起改用 **apk**，产物是 `.apk`，安装用 `apk add`。CI 默认构建 25.12，产出 `.apk`。
 - 完整的 buildroot 或 SDK，已执行 `./scripts/feeds update -a && ./scripts/feeds install -a`（需要 `feeds/packages/lang/rust`）。
 - Linux x86_64 构建主机（或 WSL2）。
 - **磁盘 ≥ 40 GB，首次编译数小时**：`PKG_BUILD_DEPENDS:=rust/host` 会从源码构建 Rust 工具链（含 LLVM）。这是 OpenWrt Rust 包的固有代价，与 OxiDNS 无关。产物会缓存在 `build_dir/` 与 `dl/cargo`，后续增量编译很快。
@@ -69,12 +86,16 @@ echo "src-link oxidns /path/to/openwrt-oxidns" >> feeds.conf
 ./scripts/feeds update oxidns
 ./scripts/feeds install -a -p oxidns
 
-make menuconfig     # Network -> IP Addresses and Names -> oxidns / oxidns-service
+make menuconfig     # Network -> IP Addresses and Names -> oxidns
 make -j$(nproc) package/feeds/oxidns/oxidns/compile V=s
-make -j$(nproc) package/feeds/oxidns/oxidns-service/compile V=s
 ```
 
-产物：`bin/packages/<arch>/oxidns/oxidns_*.ipk`（或 `*.apk`）。
+产物：
+
+| OpenWrt | 路径 | 安装命令 |
+| --- | --- | --- |
+| 25.12+ | `bin/packages/<arch>/oxidns/oxidns-<ver>-r<n>.apk` | `apk add ./oxidns-<ver>-r<n>.apk` |
+| 24.10 | `bin/packages/<arch>/oxidns/oxidns_<ver>-r<n>_<arch>.ipk` | `opkg install ./oxidns_*.ipk` |
 
 ### 方式二：直接放进 package/ 目录
 
@@ -90,9 +111,9 @@ make -j$(nproc) package/oxidns/compile V=s
 sh scripts/build-sdk.sh -t x86/64 -v 25.12.5 -o ./out
 ```
 
-脚本自动完成：下载并解压官方 SDK → 注册本地 feed → 拉取 `lang/rust` → 打开两个包 → 编译 → 收集产物到 `./out`。常用参数：`-t` 目标（如 `armsr/armv8`、`ramips/mt7621`）、`-v` OpenWrt 版本、`-j` 并行度、`-w` 工作目录。
+脚本自动完成：下载并解压官方 SDK → 注册本地 feed → 拉取 `lang/rust` → 打开 `oxidns` → 编译 → 收集产物到 `./out`。常用参数：`-t` 目标（如 `armsr/armv8`、`ramips/mt7621`）、`-v` OpenWrt 版本、`-j` 并行度、`-w` 工作目录。
 
-CI 侧的 `.github/workflows/build.yml` 用的是同一套流程（手动/打 tag 触发）。
+CI 侧的 `.github/workflows/build.yml` 用的是同一套流程（手动触发，或被上游版本探测工作流调用）。
 
 ---
 
@@ -112,26 +133,21 @@ CI 侧的 `.github/workflows/build.yml` 用的是同一套流程（手动/打 ta
 
 ## 使用
 
-### LuCI 管理
+### 安装
 
 ```sh
-opkg install oxidns luci-app-oxidns
+apk add oxidns luci-app-oxidns      # OpenWrt 25.12+（apk）
+opkg install oxidns luci-app-oxidns # OpenWrt 24.10（opkg）
+
 /etc/init.d/rpcd restart
 # 打开 LuCI：Services -> OxiDNS
 ```
 
-### 纯命令行
+改配置、启停服务、看日志都在 LuCI 的 `Services → OxiDNS` 页面里。
 
-```sh
-opkg install oxidns oxidns-service
+### 服务与 UCI 选项
 
-vi /etc/oxidns/config.yaml     # 默认监听 :5335，避免与 dnsmasq 抢 53
-/etc/init.d/oxidns enable
-/etc/init.d/oxidns start
-logread -f | grep oxidns
-```
-
-UCI 选项（`/etc/config/oxidns`）：
+`/etc/init.d/oxidns` 与 `/etc/config/oxidns` 由 `luci-app-oxidns` 提供（本仓库**不提供**）。选项如下，仅供命令行排查时参考：
 
 | 选项 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -140,7 +156,16 @@ UCI 选项（`/etc/config/oxidns`）：
 | `log_level` | 空 | 传给 `oxidns start -l` 的日志级别覆盖 |
 | `probe_config` | `1` | 启动前执行 `oxidns check`，配置有误则拒绝启动（避免 crash loop） |
 
-`reload` 语义说明：OxiDNS 未安装 `SIGHUP` 处理器，procd 的 `reload` 信号会按默认动作终止进程，因此本包把 `reload` 实现为 `restart`。
+命令行下也可以直接操作：
+
+```sh
+vi /etc/oxidns/config.yaml     # 默认监听 :5335，避免与 dnsmasq 抢 53
+/etc/init.d/oxidns enable
+/etc/init.d/oxidns start
+logread -f | grep oxidns
+```
+
+`reload` 语义说明：OxiDNS 未安装 `SIGHUP` 处理器，procd 的 `reload` 信号会按默认动作终止进程，因此服务脚本把 `reload` 实现为 `restart`。
 
 ### WebUI 资源
 
@@ -176,7 +201,7 @@ UCI 选项（`/etc/config/oxidns`）：
 
 - 版本比对基于 **上游 release tag**（`https://api.github.com/repos/svenshi/oxidns/releases/latest`）与 `net/oxidns/Makefile` 的 `PKG_VERSION`。
 - `PKG_HASH` 由脚本重新下载 tag 归档后计算，不与上游 Release 名猜版本；若 tag 内的 `Cargo.toml` 版本与 tag 不一致，脚本会拒绝写入并让工作流失败。
-- 产物：`oxidns` 与 `oxidns-service` 的 x86/64 `.apk`，发布在 Releases 页面。
+- 产物：`oxidns` 的 x86/64 `.apk`，发布在 Releases 页面。安装方式：`apk add oxidns luci-app-oxidns`。
 - 手工补跑：Actions → **upstream-watch** → *Run workflow*，勾选 `force` 可在上游没有新版时也重新编译并发布。
 
 > ⚠️ 编译耗时以小时计（要现场构建 Rust 工具链含 LLVM）。若遇到 GitHub Actions 时长上限，冷启动（无缓存）可能超时失败——此时重跑一次命中缓存即可。仅变更上游版本才会触发编译，「无更新」的日子不会消耗构建资源。
@@ -191,7 +216,7 @@ OXIDNS_OFFLINE=1 sh scripts/validate.sh      # 跳过网络检查
 OXIDNS_PROXY=http://127.0.0.1:7890 sh scripts/validate.sh
 ```
 
-检查项：必需文件、`PKG_*` 元数据、`PKG_HASH` 与上游 tarball 是否一致、tarball 顶层目录是否等于 `PKG_BUILD_DIR`、`Cargo.toml` 版本是否等于 `PKG_VERSION`、install 段引用的文件是否存在、OpenWrt 包名与 UCI 名字是否只用 `[A-Za-z0-9_]`、`sh -n` 语法、YAML 无 tab、交付文件无 CRLF。
+检查项：必需文件、`PKG_*` 元数据、`PKG_HASH` 与上游 tarball 是否一致、tarball 顶层目录是否等于 `PKG_BUILD_DIR`、`Cargo.toml` 版本是否等于 `PKG_VERSION`、install 段引用的文件是否存在、**包内是否出现 `luci-app-oxidns` 的文件路径（保证可共存）**、README 是否覆盖了所有安装路径、`sh -n` 语法、YAML 无 tab、交付文件无 CRLF。
 
 `push` / PR 时由 `.github/workflows/validate.yml` 自动执行。
 
@@ -202,19 +227,18 @@ OXIDNS_PROXY=http://127.0.0.1:7890 sh scripts/validate.sh
 ```
 .
 ├── net/oxidns/                 # OpenWrt feed 布局：<分类>/<包名>/
-│   ├── Makefile                # 包定义：oxidns + oxidns-service
+│   ├── Makefile                # 包定义（只产出 oxidns 一个包）
 │   ├── Config.in               # feature bundle 选择
 │   └── files/
-│       ├── oxidns.yaml         # /etc/oxidns/config.yaml
-│       ├── oxidns.config       # /etc/config/oxidns
-│       └── oxidns.init         # /etc/init.d/oxidns
+│       └── oxidns.yaml         # /etc/oxidns/config.yaml
 ├── scripts/
 │   ├── validate.sh             # 仓库自检
 │   ├── sync-upstream.sh        # 跟进上游新版本（更新 PKG_VERSION/PKG_HASH）
 │   └── build-sdk.sh            # 用官方 SDK 构建
 └── .github/workflows/
     ├── validate.yml            # 元数据 / 文件校验
-    └── build.yml               # 手动或打 tag 触发，产出 .ipk/.apk
+    ├── build.yml               # 可复用：手动或由上游探测调用，产出 .apk
+    └── upstream-watch.yml      # 每 24h 探测上游 → 有新版本则编译并发布 Release
 ```
 
 ---

@@ -16,9 +16,11 @@
 #   /etc/oxidns/config.yaml        default configuration
 #   /usr/share/oxidns/webui        WebUI asset directory (see README)
 #
-# The PROCD init script and the /etc/config/oxidns UCI file live in the
-# separate "oxidns-service" package so that they never collide with the
-# copies shipped by luci-app-oxidns.
+# The PROCD init script (/etc/init.d/oxidns) and the UCI file
+# (/etc/config/oxidns) are deliberately NOT shipped by this package:
+# luci-app-oxidns already provides both. Shipping them here would make the two
+# packages collide on those paths, so this package only ships the core binary
+# and the files that luci-app-oxidns does not provide.
 
 include $(TOPDIR)/rules.mk
 
@@ -77,8 +79,14 @@ define Package/oxidns/description
   answers and system side effects into one declarative, explainable pipeline and
   ships a management API, a WebUI, query records and Prometheus metrics.
 
-  Built from source inside the OpenWrt build system. Package layout matches the
-  one used by luci-app-oxidns, so the LuCI app can drive this build directly.
+  Built from source inside the OpenWrt build system. The package layout is
+  exactly the one luci-app-oxidns expects, so the two are meant to be installed
+  together:
+
+      apk add oxidns luci-app-oxidns
+
+  luci-app-oxidns supplies the procd service, the UCI configuration and the LuCI
+  pages; this package only supplies the core binary and its default config.
 
   Upstream project: https://github.com/svenshi/oxidns
 endef
@@ -111,39 +119,4 @@ define Package/oxidns/config
 	source "$(SOURCE)/Config.in"
 endef
 
-# --- CLI-only deployment: procd service + UCI ---------------------------------
-# Ships exactly the two files that luci-app-oxidns also ships, therefore the
-# two packages are mutually exclusive.
-define Package/oxidns-service
-  SECTION:=net
-  CATEGORY:=Network
-  SUBMENU:=IP Addresses and Names
-  TITLE:=OxiDNS procd service and UCI configuration (CLI deployment)
-  URL:=https://github.com/svenshi/oxidns
-  DEPENDS:=+oxidns
-  CONFLICTS:=luci-app-oxidns
-endef
-
-define Package/oxidns-service/description
-  PROCD init script (/etc/init.d/oxidns) and UCI configuration
-  (/etc/config/oxidns) for running OxiDNS without LuCI.
-
-  Do not install this together with luci-app-oxidns: the LuCI app ships the
-  same two files, so opkg/apk would report a file conflict. Install either
-  "oxidns + oxidns-service" (CLI only) or "oxidns + luci-app-oxidns" (LuCI).
-endef
-
-define Package/oxidns-service/conffiles
-/etc/config/oxidns
-endef
-
-define Package/oxidns-service/install
-	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/oxidns.init $(1)/etc/init.d/oxidns
-
-	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/oxidns.config $(1)/etc/config/oxidns
-endef
-
 $(eval $(call BuildPackage,oxidns))
-$(eval $(call BuildPackage,oxidns-service))

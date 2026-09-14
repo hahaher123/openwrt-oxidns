@@ -20,22 +20,37 @@ UPSTREAM_REPO="svenshi/oxidns"
 PROXY="${OXIDNS_PROXY:-}"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-sync.XXXXXX")"
+# mktemp may hand back a Windows-style path (C:\...) when TMPDIR is a Windows
+# path; GNU tar would read that as a remote "host:file" spec. cd+pwd normalises
+# it to a shell path.
+WORK="$(cd "$WORK" && pwd)"
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 
 fetch() {
-	if command -v curl >/dev/null 2>&1; then
-		if [ -n "$PROXY" ]; then
-			curl -fsSL -x "$PROXY" -o "$2" "$1"
+	# fetch <url> <dest>
+	#
+	# Runs in a subshell that cd's into the destination directory and downloads
+	# to "./<name>". That keeps the path relative, which matters when the only
+	# curl around is the Windows one (it understands C:\... but not MSYS
+	# /c/... paths) while tar wants the opposite.
+	dir="$(dirname "$2")"
+	base="$(basename "$2")"
+	(
+		cd "$dir" || exit 1
+		if command -v curl >/dev/null 2>&1; then
+			if [ -n "$PROXY" ]; then
+				curl -fsSL -x "$PROXY" -o "./$base" "$1"
+			else
+				curl -fsSL -o "./$base" "$1"
+			fi
 		else
-			curl -fsSL -o "$2" "$1"
+			if [ -n "$PROXY" ]; then
+				http_proxy="$PROXY" https_proxy="$PROXY" wget -q -O "./$base" "$1"
+			else
+				wget -q -O "./$base" "$1"
+			fi
 		fi
-	else
-		if [ -n "$PROXY" ]; then
-			http_proxy="$PROXY" https_proxy="$PROXY" wget -q -O "$2" "$1"
-		else
-			wget -q -O "$2" "$1"
-		fi
-	fi
+	)
 }
 
 sha256_of() {

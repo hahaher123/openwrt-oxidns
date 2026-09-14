@@ -122,7 +122,6 @@ printf 'Updating feeds ...\n'
 # The SDK ships a .config for its own target: extend it, never replace it.
 grep -q '^CONFIG_PACKAGE_oxidns=y' .config || cat >> .config <<EOF
 CONFIG_PACKAGE_oxidns=y
-CONFIG_PACKAGE_oxidns-service=y
 EOF
 
 printf 'Preparing configuration (make defconfig) ...\n'
@@ -153,11 +152,10 @@ build_pkg() {
 	return 1
 }
 
-printf '\nBuilding oxidns + oxidns-service. This can take a very long time ...\n'
+printf '\nBuilding oxidns. This can take a very long time ...\n'
 printf 'Full build log: %s\n' "$WORKDIR/build.log"
 : > "$WORKDIR/build.log"
 build_pkg oxidns
-build_pkg oxidns-service
 
 artefacts="$(
 	find bin/packages -maxdepth 3 -type f \( -name 'oxidns*.ipk' -o -name 'oxidns*.apk' \) | sort
