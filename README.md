@@ -208,20 +208,6 @@ logread -f | grep oxidns
 
 ---
 
-## 仓库自检
-
-```sh
-sh scripts/validate.sh                       # 完整检查（需要可访问 GitHub）
-OXIDNS_OFFLINE=1 sh scripts/validate.sh      # 跳过网络检查
-OXIDNS_PROXY=http://127.0.0.1:7890 sh scripts/validate.sh
-```
-
-检查项：必需文件、`PKG_*` 元数据、`PKG_HASH` 与上游 tarball 是否一致、tarball 顶层目录是否等于 `PKG_BUILD_DIR`、`Cargo.toml` 版本是否等于 `PKG_VERSION`、install 段引用的文件是否存在、**包内是否出现 `luci-app-oxidns` 的文件路径（保证可共存）**、README 是否覆盖了所有安装路径、`sh -n` 语法、YAML 无 tab、交付文件无 CRLF。
-
-`push` / PR 时由 `.github/workflows/validate.yml` 自动执行。
-
----
-
 ## 目录结构
 
 ```
