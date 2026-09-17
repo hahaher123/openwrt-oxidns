@@ -192,12 +192,13 @@ logread -f | grep oxidns
                        │
                        ├── 提交 "oxidns: update to <ver>" 并推送
                        ├── 用 OpenWrt SDK 25.12.5 编译 x86/64
-                       └── 发布 GitHub Release（tag v<ver>，附件 .apk）
+                       └── 发布 GitHub Release（tag v<PKG_VERSION>-r<PKG_RELEASE>，附件 .apk）
 ```
 
 - 版本比对基于 **上游 release tag**（`https://api.github.com/repos/svenshi/oxidns/releases/latest`）与 `net/oxidns/Makefile` 的 `PKG_VERSION`。
 - `PKG_HASH` 由脚本重新下载 tag 归档后计算，不与上游 Release 名猜版本；若 tag 内的 `Cargo.toml` 版本与 tag 不一致，脚本会拒绝写入并让工作流失败。
 - 产物：`oxidns` 的 x86/64 `.apk`，发布在 Releases 页面。安装方式：`apk add oxidns luci-app-oxidns`。
+- tag 带上 `-r<PKG_RELEASE>`，所以本地修 bug 只升 `PKG_RELEASE` 也能发出新 Release，而不会静默覆盖上一个。版本号约定：修 bug 升 `PKG_RELEASE`，跟进上游 / 新增功能升 `PKG_VERSION`（同时把 `PKG_RELEASE` 重置为 `1`）。
 - 手工补跑：Actions → **upstream-watch** → *Run workflow*，勾选 `force` 可在上游没有新版时也重新编译并发布。
 
 > ⚠️ 编译耗时以小时计：冷启动要从源码构建 Rust 工具链（含 LLVM，约 90 分钟），再加上 OxiDNS 本体（约 600 个 crate，开了 LTO + `opt-level=z`）。GitHub 侧缓存了 SDK 归档与 rust host 工具链（`staging_dir/host`、`staging_dir/hostpkg`、`build_dir/target-*/host`、`dl`），命中后 rust 工具链直接复用。但缓存只在**整个作业成功**后才会保存——冷启动若因任何原因失败，下一次仍然是冷启动。仅变更上游版本才会触发编译，「无更新」的日子不消耗构建资源。

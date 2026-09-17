@@ -5,6 +5,10 @@ name: upstream-watch
 # workflow bumps the package, commits the bump, rebuilds the x86/64 packages and
 # publishes them as a GitHub Release.
 #
+# Tag rule: v<PKG_VERSION>-r<PKG_RELEASE>, matching the package version exactly.
+# A local fix that only bumps PKG_RELEASE therefore gets its own tag instead of
+# silently overwriting the previous release (dispatch with `force` to publish it).
+#
 # The probe itself is cheap (two HTTP requests), so a "nothing changed" day
 # costs seconds. Only `changed == true` starts the expensive build.
 
@@ -41,7 +45,9 @@ jobs:
     outputs:
       changed: ${{ steps.bump.outputs.changed }}
       version: ${{ steps.bump.outputs.version }}
+      release: ${{ steps.bump.outputs.release }}
       previous: ${{ steps.bump.outputs.previous }}
+      previous_release: ${{ steps.bump.outputs.previous_release }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,12 +60,18 @@ jobs:
           MAKE=net/oxidns/Makefile
 
           previous="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
+          previous_release="$(sed -n 's/^PKG_RELEASE:=//p' "$MAKE" | head -n1)"
           sh scripts/sync-upstream.sh
           version="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
+          # sync-upstream.sh 在换 PKG_VERSION 时会把 PKG_RELEASE 重置为 1；
+          # 若是本地修 bug 只升了 PKG_RELEASE，这里读到的就是新修订号。
+          release="$(sed -n 's/^PKG_RELEASE:=//p' "$MAKE" | head -n1)"
 
           echo "upstream=$version  local=$previous"
           echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "release=$release"   >> "$GITHUB_OUTPUT"
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "previous_release=$previous_release" >> "$GITHUB_OUTPUT"
 
           if [ "$version" != "$previous" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -87,7 +99,8 @@ jobs:
             echo '| | |'
             echo '|---|---|'
             echo "| upstream | ${{ steps.bump.outputs.version }} |"
-            echo "| local before | ${{ steps.bump.outputs.previous }} |"
+            echo "| local before | ${{ steps.bump.outputs.previous }}-r${{ steps.bump.outputs.previous_release }} |"
+            echo "| package version | ${{ steps.bump.outputs.version }}-r${{ steps.bump.outputs.release }} |"
             echo "| changed | ${{ steps.bump.outputs.changed }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -133,15 +146,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
+          RELEASE: ${{ needs.check.outputs.release }}
         run: |
           set -eu
-          tag="v$VERSION"
+          # 完整包版本 = PKG_VERSION-PKG_RELEASE。tag 必须带上 -r，否则同一上游版本下
+          # 只升 PKG_RELEASE（修 bug / 改安装产物）会撞上已有 tag，变成静默覆盖旧 Release。
+          tag="v$VERSION-r$RELEASE"
 
           # Quoted heredoc: keep the markdown backticks literal, inject the
           # version afterwards instead.
           cat > notes.md <<'NOTES'
           OxiDNS **__VERSION__** compiled from source inside the OpenWrt build
           system. Target `x86/64`, OpenWrt 25.12 (SDK 25.12.5), `apk` packages.
+          Package version: `__PKGVER__`.
 
           | package | contents |
           |---|---|
@@ -164,14 +181,14 @@ jobs:
           > by the OxiDNS project; it exists only to make OxiDNS installable on
           > OpenWrt.
           NOTES
-          sed -i "s/__VERSION__/$VERSION/g" notes.md
+          sed -i -e "s/__VERSION__/$VERSION/g" -e "s/__PKGVER__/$VERSION-r$RELEASE/g" notes.md
 
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release $tag already exists - uploading assets"
             gh release upload "$tag" dist/*.apk --clobber
           else
             gh release create "$tag" dist/*.apk \
-              --title "OxiDNS $VERSION (OpenWrt x86/64)" \
+              --title "OxiDNS $VERSION-r$RELEASE (OpenWrt x86/64)" \
               --notes-file notes.md
           fi
 
