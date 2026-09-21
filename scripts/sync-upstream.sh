@@ -4,7 +4,7 @@
 # Bump this package to an upstream OxiDNS release.
 #
 # It reads the version from the tarball (not from the release name), recomputes
-# PKG_HASH and rewrites net/oxidns/Makefile. Nothing is committed: review the
+# PKG_HASH and rewrites oxidns/Makefile. Nothing is committed: review the
 # diff and commit it yourself.
 #
 # Usage:
@@ -15,7 +15,7 @@
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MAKE="$REPO_ROOT/net/oxidns/Makefile"
+MAKE="$REPO_ROOT/oxidns/Makefile"
 UPSTREAM_REPO="svenshi/oxidns"
 PROXY="${OXIDNS_PROXY:-}"
 

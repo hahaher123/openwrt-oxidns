@@ -16,7 +16,7 @@
 
 set -eu
 
-PKG_DIR="net/oxidns"
+PKG_DIR="oxidns"
 MAKE="$PKG_DIR/Makefile"
 UPSTREAM_REPO="svenshi/oxidns"
 

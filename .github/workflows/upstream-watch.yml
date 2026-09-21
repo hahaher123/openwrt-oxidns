@@ -1,7 +1,7 @@
 name: upstream-watch
 
 # Every 24 hours: probe https://github.com/svenshi/oxidns for a new release.
-# If the upstream version is newer than PKG_VERSION in net/oxidns/Makefile, this
+# If the upstream version is newer than PKG_VERSION in oxidns/Makefile, this
 # workflow bumps the package, commits the bump, rebuilds the x86/64 packages and
 # publishes them as a GitHub Release.
 #
@@ -32,7 +32,7 @@ permissions:
   contents: write
   actions: read
 
-# Never let two probes race on net/oxidns/Makefile.
+# Never let two probes race on oxidns/Makefile.
 concurrency:
   group: upstream-watch
   cancel-in-progress: false
@@ -57,7 +57,7 @@ jobs:
         id: bump
         run: |
           set -eu
-          MAKE=net/oxidns/Makefile
+          MAKE=oxidns/Makefile
 
           previous="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
           previous_release="$(sed -n 's/^PKG_RELEASE:=//p' "$MAKE" | head -n1)"
@@ -87,7 +87,7 @@ jobs:
           set -eu
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add net/oxidns/Makefile
+          git add oxidns/Makefile
           git commit -m "oxidns: update to ${VERSION}"
           git push origin "HEAD:${{ github.ref_name }}"
 

@@ -1,7 +1,7 @@
 * text=auto eol=lf
 
 # Keep the init script executable through git
-net/oxidns/files/oxidns.init text eol=lf
+oxidns/files/* text eol=lf
 scripts/*.sh text eol=lf
 
 *.png binary
