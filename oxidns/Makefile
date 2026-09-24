@@ -25,7 +25,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
-PKG_VERSION:=1.5.2
+PKG_VERSION:=1.6.0
 PKG_RELEASE:=1
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
@@ -33,7 +33,7 @@ PKG_RELEASE:=1
 # which matches the default PKG_BUILD_DIR.
 PKG_SOURCE:=v$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/svenshi/oxidns/archive/refs/tags
-PKG_HASH:=51d2b554926bcd4504115f51a7d93e552c1a9e1252d4617487b2ebc5699775d6
+PKG_HASH:=7633d6377082f58a61cd301ed02635fa36ac33a75783ef7647bfa7030c3b33c5
 
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
