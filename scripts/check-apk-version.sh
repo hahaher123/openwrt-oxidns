@@ -60,12 +60,18 @@ for apk in "$@"; do
 
 	# 2) the metadata inside the package must agree.
 	#
-	# apk-tools 3 stores a package as an ADB container: the ASCII magic
-	# "ADBd", then a bare deflate stream (no zlib/gzip wrapper, so wbits=-15).
-	# The control section begins with "ADB.pckg " followed by the schema,
-	# then the package name and version as back-to-back length-prefixed
-	# fields: <len>name<len>version. Both are single-byte lengths for names
-	# this short, which is the only shape we need to handle.
+	# apk-tools 3 stores a package as an ADB container: the ASCII magic "ADBd",
+	# then a bare deflate stream (no zlib/gzip wrapper, so wbits=-15). After
+	# decompressing, the payload starts with "ADB.pckg", a u64 (payload length)
+	# and a u32 - so the metadata fields begin at offset 20, as a flat sequence
+	# of <length><content> pairs in the order
+	#   name, version, description, arch, ...
+	# The length prefix width depends on the content length (apk-tools
+	# src/adb.c, adb_w_blob_vec): <=0xff -> 1 byte, <=0xffff -> 2 bytes, larger
+	# -> 4 bytes, little-endian. Only name and version are read here; both are
+	# far shorter than 255 bytes, so a single-byte prefix is always correct for
+	# them. (The description that follows is NOT, which is why the parser stops
+	# after the version instead of walking the whole record.)
 	python_bin=""
 	for cand in python3 python; do
 		if command -v "$cand" >/dev/null 2>&1; then
@@ -80,10 +86,10 @@ for apk in "$@"; do
 		continue
 	fi
 
-	got="$("$python_bin" - "$apk" "$base" <<'PY'
+	got="$("$python_bin" - "$apk" <<'PY'
 import sys, zlib
 
-path, base = sys.argv[1], sys.argv[2]
+path = sys.argv[1]
 data = open(path, 'rb').read()
 
 if not data.startswith(b'ADB'):
@@ -97,7 +103,7 @@ for start in range(4, min(len(data), 8192)):
         cand = zlib.decompressobj(-15).decompress(data[start:])
     except Exception:
         continue
-    if cand.startswith(b'ADB.pckg '):
+    if cand.startswith(b'ADB.pckg'):
         blob = cand
         break
 
@@ -105,25 +111,18 @@ if blob is None:
     print('NO_CONTROL')
     sys.exit(0)
 
-# Derive the expected name from the file name: <name>-<version>-r<rel>.apk
-stem = base[:-4] if base.endswith('.apk') else base
-name = stem.split('-')[0]
-
-anchor = blob.index(b'ADB.pckg ')
-# The name/version fields sit right after the short schema header; a 64 byte
-# window is comfortably enough and keeps a stray match elsewhere in the
-# (compressed-binary-laden) control section from winning.
-for pos in range(anchor, min(len(blob) - 16, anchor + 64)):
-    if blob[pos:pos + len(name)] != name.encode():
-        continue
-    if blob[pos - 1] != len(name):
-        continue
-    vlen = blob[pos + len(name)]
-    version = blob[pos + len(name) + 1:pos + len(name) + 1 + vlen]
-    print(version.decode('utf-8', 'replace'))
+# name and version sit at offset 20, each as a single-byte length + content.
+try:
+    nlen = blob[20]
+    name = blob[21:21 + nlen]
+    vlen_pos = 21 + nlen
+    vlen = blob[vlen_pos]
+    version = blob[vlen_pos + 1:vlen_pos + 1 + vlen]
+except IndexError:
+    print('TRUNCATED')
     sys.exit(0)
 
-print('NO_VERSION')
+print(version.decode('utf-8', 'replace'))
 PY
 )"
 
