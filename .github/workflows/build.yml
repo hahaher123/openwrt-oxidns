@@ -60,7 +60,16 @@ jobs:
       SDK_VERSION: ${{ inputs.sdk_version || '25.12.5' }}
 
     steps:
+      # Check out the branch tip, not github.sha.
+      #
+      # github.sha is frozen at the commit that triggered the run. When this
+      # reusable workflow is called from upstream-watch, the probe job commits
+      # the version bump *after* the run started, so a plain checkout would
+      # build the previous version while the caller tags the result with the
+      # new one. Following the branch picks up the bump commit.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Resolve target id
         run: |
@@ -149,6 +158,17 @@ jobs:
             ls -l out 2>/dev/null || echo '(none)'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Fail here rather than publish a package whose contents do not match the
+      # version the caller is about to tag it with. The packages must carry the
+      # version read from the Makefile we just built.
+      - name: Verify the built packages match the Makefile version
+        run: |
+          set -eu
+          pkg_version="$(sed -n 's/^PKG_VERSION:=//p' oxidns/Makefile | head -n1)"
+          pkg_release="$(sed -n 's/^PKG_RELEASE:=//p' oxidns/Makefile | head -n1)"
+          printf 'Makefile says %s-r%s\n' "$pkg_version" "$pkg_release"
+          sh scripts/check-apk-version.sh "${pkg_version}-r${pkg_release}" out/*.apk
 
       - name: Upload packages
         uses: actions/upload-artifact@v4

@@ -125,8 +125,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      # gh derives the target repository from the git remote.
+      # gh derives the target repository from the git remote. Follow the branch
+      # tip so the Makefile read here agrees with the packages just built (the
+      # probe job pushed the version bump after the run started).
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Download packages
         uses: actions/download-artifact@v4
@@ -141,6 +145,25 @@ jobs:
           count="$(find dist -type f -name '*.apk' | wc -l)"
           echo "apk count: $count"
           [ "$count" -gt 0 ] || { echo 'no .apk produced - nothing to publish' >&2; exit 1; }
+
+      # Guard against shipping a package whose contents disagree with the tag,
+      # which is exactly what happened before: v1.6.0 was published carrying a
+      # 1.5.2 build. Also catches the Makefile drifting from the probe's output.
+      - name: Verify package versions against the Makefile
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          RELEASE: ${{ needs.check.outputs.release }}
+        run: |
+          set -eu
+          make_version="$(sed -n 's/^PKG_VERSION:=//p' oxidns/Makefile | head -n1)"
+          make_release="$(sed -n 's/^PKG_RELEASE:=//p' oxidns/Makefile | head -n1)"
+          printf 'probe reported %s-r%s, Makefile has %s-r%s\n' \
+            "$VERSION" "$RELEASE" "$make_version" "$make_release"
+          if [ "${VERSION}-r${RELEASE}" != "${make_version}-r${make_release}" ]; then
+            echo "::error::the probe's version differs from the checked out Makefile" >&2
+            exit 1
+          fi
+          sh scripts/check-apk-version.sh "${VERSION}-r${RELEASE}" dist/*.apk
 
       - name: Publish GitHub Release
         env:

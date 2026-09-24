@@ -113,6 +113,7 @@ for f in \
 	"scripts/build-sdk.sh" \
 	"scripts/sync-upstream.sh" \
 	"scripts/test-build-sdk.sh" \
+	"scripts/check-apk-version.sh" \
 	"LICENSE" \
 	"README.md"
 do
@@ -264,7 +265,7 @@ fi
 section "file syntax"
 
 for f in scripts/validate.sh scripts/build-sdk.sh scripts/sync-upstream.sh \
-	scripts/test-build-sdk.sh
+	scripts/test-build-sdk.sh scripts/check-apk-version.sh
 do
 	if [ -f "$f" ]; then
 		if sh -n "$f" 2>"$WORK/sh.err"; then
@@ -362,6 +363,38 @@ else
 			printf '  note  upstream latest release is %s, this package builds %s\n' "$latest" "$PKG_VERSION"
 		fi
 	fi
+fi
+
+# --- 8. version checker self-test ---------------------------------------------
+#
+# check-apk-version.sh is what stops a mis-versioned package from being
+# published, so its own decision logic gets a regression test here. The names
+# are fake (no real package is needed) - only the file-name layer can be
+# exercised without an actual .apk, which is enough to prove it fails closed.
+
+section "version checker self-test"
+
+CHECKER="scripts/check-apk-version.sh"
+SELFTEST="$WORK/apks"
+mkdir -p "$SELFTEST"
+: > "$SELFTEST/oxidns-1.6.0-r1.apk"
+
+if sh "$CHECKER" v1.6.0-r1 "$SELFTEST/oxidns-1.6.0-r1.apk" >/dev/null 2>&1; then
+	ok "checker accepts a matching file name"
+else
+	fail "checker rejected a matching file name"
+fi
+
+if sh "$CHECKER" v1.9.9-r1 "$SELFTEST/oxidns-1.6.0-r1.apk" >/dev/null 2>&1; then
+	fail "checker accepted a mismatching version"
+else
+	ok "checker rejects a mismatching version"
+fi
+
+if sh "$CHECKER" v1.6.0 "$SELFTEST/oxidns-1.6.0-r1.apk" >/dev/null 2>&1; then
+	ok "checker normalises a tag without -r to r1"
+else
+	fail "checker did not normalise a tag without -r"
 fi
 
 # --- summary ------------------------------------------------------------------
