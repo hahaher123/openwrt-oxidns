@@ -138,6 +138,12 @@ PKG_SOURCE_URL="$(makevar PKG_SOURCE_URL)"
 PKG_HASH="$(makevar PKG_HASH)"
 PKG_LICENSE="$(makevar PKG_LICENSE)"
 
+# WebUI archive: the package pulls it from the release assets, so it carries a
+# second digest. Both are validated below.
+WEBUI_ARCHIVE="$(makevar OXIDNS_WEBUI_ARCHIVE)"
+WEBUI_URL="$(makevar OXIDNS_WEBUI_URL)"
+WEBUI_HASH="$(makevar OXIDNS_WEBUI_HASH)"
+
 for pair in \
 	"PKG_NAME:$PKG_NAME" \
 	"PKG_VERSION:$PKG_VERSION" \
@@ -145,7 +151,10 @@ for pair in \
 	"PKG_SOURCE:$PKG_SOURCE" \
 	"PKG_SOURCE_URL:$PKG_SOURCE_URL" \
 	"PKG_HASH:$PKG_HASH" \
-	"PKG_LICENSE:$PKG_LICENSE"
+	"PKG_LICENSE:$PKG_LICENSE" \
+	"OXIDNS_WEBUI_ARCHIVE:$WEBUI_ARCHIVE" \
+	"OXIDNS_WEBUI_URL:$WEBUI_URL" \
+	"OXIDNS_WEBUI_HASH:$WEBUI_HASH"
 do
 	name="${pair%%:*}"
 	value="${pair#*:}"
@@ -168,6 +177,53 @@ case "$PKG_HASH" in
 	*[!0-9a-f]*) fail "PKG_HASH is not lowercase hex" ;;
 	*) [ "${#PKG_HASH}" -eq 64 ] && ok "PKG_HASH is a 64 char sha256" || fail "PKG_HASH length is ${#PKG_HASH}, expected 64" ;;
 esac
+
+case "$WEBUI_HASH" in
+	*[!0-9a-f]*) fail "OXIDNS_WEBUI_HASH is not lowercase hex" ;;
+	*) [ "${#WEBUI_HASH}" -eq 64 ] && ok "OXIDNS_WEBUI_HASH is a 64 char sha256" || fail "OXIDNS_WEBUI_HASH length is ${#WEBUI_HASH}, expected 64" ;;
+esac
+
+# The WebUI archive must come from the release matching PKG_VERSION, otherwise
+# a version bump ships a WebUI from a different release.
+WEBUI_URL_RESOLVED="$(printf '%s' "$WEBUI_URL" | sed "s/\\\$(PKG_VERSION)/$PKG_VERSION/g")"
+case "$WEBUI_URL_RESOLVED" in
+	*/download/v"$PKG_VERSION")
+		ok "OXIDNS_WEBUI_URL points at release v$PKG_VERSION" ;;
+	*)
+		fail "OXIDNS_WEBUI_URL resolves to '$WEBUI_URL_RESOLVED', expected a .../download/v$PKG_VERSION URL" ;;
+esac
+
+if grep -q 'curl.*\$' "$MAKE" 2>/dev/null; then
+	fail "the Makefile downloads outside the build system (bare curl)"
+else
+	ok "the Makefile uses the build system download macros"
+fi
+
+# The WebUI must be declared through the build system's Download macro. Without
+# it the archive is never fetched and the package ships an empty webui/ again.
+if grep -q '^define Download/oxidns-webui' "$MAKE" \
+	&& grep -q 'call Download,oxidns-webui' "$MAKE"; then
+	ok "the WebUI archive is declared via Download/oxidns-webui"
+else
+	fail "Download/oxidns-webui is not declared (or not evaluated) in the Makefile"
+fi
+
+# The install section must actually copy the unpacked assets; a bare
+# INSTALL_DIR is what shipped the empty directory in the first place.
+if grep -q 'webui-dist/webui/\.' "$MAKE"; then
+	ok "the install section copies the unpacked WebUI assets"
+else
+	fail "the install section does not copy the WebUI assets"
+fi
+
+# And the archive must actually be unpacked during prepare. Anchored on the
+# tar invocation rather than on "webui-dist", which the install section uses
+# too and would therefore match even with the extraction removed.
+if grep -q 'xzf[[:space:]]*\$(DL_DIR)/\$(OXIDNS_WEBUI_ARCHIVE)' "$MAKE"; then
+	ok "Build/Prepare unpacks the WebUI archive"
+else
+	fail "Build/Prepare does not unpack the WebUI archive"
+fi
 
 if grep -q 'PKG_BUILD_DEPENDS:=.*rust/host' "$MAKE"; then
 	ok "PKG_BUILD_DEPENDS pulls in the Rust host toolchain"
@@ -352,6 +408,29 @@ else
 		fi
 	else
 		fail "could not download $PKG_SOURCE_URL/$SOURCE_FILE ($(cat "$WORK/dl.err" 2>/dev/null))"
+	fi
+
+	# WebUI archive: same treatment. A wrong digest here means the build fails
+	# on a checksum mismatch only after the Rust toolchain has been compiled,
+	# so it is checked up front.
+	WEBUI_TARBALL="$WORK/$WEBUI_ARCHIVE"
+	if fetch "$WEBUI_URL_RESOLVED/$WEBUI_ARCHIVE" "$WEBUI_TARBALL" 2>"$WORK/dl-webui.err"; then
+		ok "downloaded $WEBUI_URL_RESOLVED/$WEBUI_ARCHIVE"
+
+		actual="$(sha256_of "$WEBUI_TARBALL")"
+		if [ "$actual" = "$WEBUI_HASH" ]; then
+			ok "OXIDNS_WEBUI_HASH matches the release archive"
+		else
+			fail "OXIDNS_WEBUI_HASH mismatch: upstream=$actual, Makefile=$WEBUI_HASH"
+		fi
+
+		if tar -tzf "$WEBUI_TARBALL" 2>/dev/null | grep -qx 'webui/index.html'; then
+			ok "the release archive carries a built WebUI (webui/index.html)"
+		else
+			fail "the release archive has no webui/index.html"
+		fi
+	else
+		fail "could not download $WEBUI_URL_RESOLVED/$WEBUI_ARCHIVE ($(cat "$WORK/dl-webui.err" 2>/dev/null))"
 	fi
 
 	# releases API: report how far behind the package is (informational)

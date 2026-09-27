@@ -4,8 +4,11 @@
 # Bump this package to an upstream OxiDNS release.
 #
 # It reads the version from the tarball (not from the release name), recomputes
-# PKG_HASH and rewrites oxidns/Makefile. Nothing is committed: review the
-# diff and commit it yourself.
+# PKG_HASH and rewrites oxidns/Makefile. The WebUI comes from the release
+# archive rather than from the sources, so its hash is recomputed here too -
+# miss that and the build fails on a checksum mismatch.
+#
+# Nothing is committed: review the diff and commit it yourself.
 #
 # Usage:
 #   sh scripts/sync-upstream.sh                  # latest upstream release
@@ -18,6 +21,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MAKE="$REPO_ROOT/oxidns/Makefile"
 UPSTREAM_REPO="svenshi/oxidns"
 PROXY="${OXIDNS_PROXY:-}"
+
+# Must match OXIDNS_WEBUI_ARCHIVE in oxidns/Makefile.
+WEBUI_ARCHIVE="oxidns-x86_64-unknown-linux-musl.tar.gz"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-sync.XXXXXX")"
 # mktemp may hand back a Windows-style path (C:\...) when TMPDIR is a Windows
@@ -91,8 +97,28 @@ fi
 hash="$(sha256_of "$tarball")"
 old_version="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
 old_hash="$(sed -n 's/^PKG_HASH:=//p' "$MAKE" | head -n1)"
+old_webui_hash="$(sed -n 's/^OXIDNS_WEBUI_HASH:=//p' "$MAKE" | head -n1)"
 
-if [ "$old_version" = "$version" ] && [ "$old_hash" = "$hash" ]; then
+# The WebUI is packaged from the release archive, so its digest has to track
+# the release as well.
+webui_url="https://github.com/$UPSTREAM_REPO/releases/download/v$version/$WEBUI_ARCHIVE"
+webui_archive="$WORK/$WEBUI_ARCHIVE"
+
+printf 'Downloading %s\n' "$webui_url"
+fetch "$webui_url" "$webui_archive"
+
+webui_hash="$(sha256_of "$webui_archive")"
+
+# Same guard as for the source archive: the release must actually carry the
+# prebuilt WebUI, otherwise the package would ship an empty directory again.
+if ! tar -tzf "$webui_archive" 2>/dev/null | grep -qx 'webui/index.html'; then
+	echo "$WEBUI_ARCHIVE does not contain webui/index.html - refusing to bump" >&2
+	exit 1
+fi
+
+if [ "$old_version" = "$version" ] \
+	&& [ "$old_hash" = "$hash" ] \
+	&& [ "$old_webui_hash" = "$webui_hash" ]; then
 	printf 'Already up to date: %s (%s)\n' "$version" "$hash"
 	exit 0
 fi
@@ -100,11 +126,13 @@ fi
 sed -e "s/^PKG_VERSION:=.*/PKG_VERSION:=$version/" \
 	-e "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" \
 	-e "s/^PKG_HASH:=.*/PKG_HASH:=$hash/" \
+	-e "s/^OXIDNS_WEBUI_HASH:=.*/OXIDNS_WEBUI_HASH:=$webui_hash/" \
 	"$MAKE" > "$WORK/Makefile.new"
 mv "$WORK/Makefile.new" "$MAKE"
 chmod 644 "$MAKE"
 
 printf '\nUpdated %s\n' "$MAKE"
-printf '  PKG_VERSION %s -> %s\n' "$old_version" "$version"
-printf '  PKG_HASH    %s -> %s\n' "$old_hash" "$hash"
+printf '  PKG_VERSION       %s -> %s\n' "$old_version" "$version"
+printf '  PKG_HASH          %s -> %s\n' "$old_hash" "$hash"
+printf '  OXIDNS_WEBUI_HASH %s -> %s\n' "$old_webui_hash" "$webui_hash"
 printf '\nNext: sh scripts/validate.sh && git commit -am "oxidns: update to %s"\n' "$version"

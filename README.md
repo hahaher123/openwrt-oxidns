@@ -4,16 +4,20 @@
 
 ## 安装（设备上）
 
-与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）与 `/usr/share/oxidns/webui/` 空目录；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
+与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）与 `/usr/share/oxidns/webui/` 下的 WebUI 静态资源；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
 
 ```sh
 apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
 /etc/init.d/rpcd restart            # 打开 LuCI：Services -> OxiDNS
 ```
 
-⚠️ 装了本包之后**不要**再用 LuCI `Core` 页的 `Install Core` / `Remove Core`：它会绕过包管理器直接读写 `/usr/bin/oxidns`，导致 apk 数据库与实际文件不一致。升级核心 = 升级 `oxidns` 包。
+装好后 `/usr/share/oxidns/webui/` 里已经有可直接访问的 WebUI，不必再去 LuCI `Core` 页上传官方归档。`Remove Core` 只删核心二进制、不会动包提供的 WebUI 资源。
 
-默认配置监听 `:5335`（避开 dnsmasq 的 53），不装 WebUI 不影响 DNS 与管理 API。
+默认配置监听 `:5335`（避开 dnsmasq 的 53）。
+
+## WebUI 来源
+
+WebUI 是独立构建的 Next.js 静态产物，上游只随 Release 归档分发预构建的 `webui/`，源码 tag 归档里只有未构建的前端源码。本包在构建时下载官方 `oxidns-x86_64-unknown-linux-musl.tar.gz` 并只取其中的 `webui/` 装入 `/usr/share/oxidns/webui/`——与官方 Docker 镜像、Debian 包取的是同一份产物。前端资源平台无关，全架构共用一份，也免去在 buildroot 里跑 pnpm。
 
 ## 从源码构建
 
@@ -40,10 +44,10 @@ sh scripts/build-sdk.sh -t x86/64 -v 25.12.5 -o ./out
 
 ## 自动化
 
-`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH`、用 SDK 编译 x86/64 并发布 Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`，附件 .apk）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
+`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH` / `OXIDNS_WEBUI_HASH`、用 SDK 编译 x86/64 并发布 Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`，附件 .apk）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
 
 ## 已知限制
 
 - 仅支持 OpenWrt 官方 Rust 包覆盖的架构（aarch64 / x86_64 / mipsel / riscv64 等）；自动化只产出 x86/64，其它架构用 `build-sdk.sh -t <目标>` 自编。
 - OpenWrt 24.10 及更早无法编译（rust 过旧）。
-- 上游源码不含构建好的前端产物，`webui/` 目录为空；需要 WebUI 就在 LuCI `Core` 页上传官方归档，或自行构建前端后拷入。
+- WebUI 取自上游 Release 归档，无法脱离上游构建；上游若某版本漏发 musl 归档，该版本构建会失败（`build` 阶段直接报错，不会静默出空目录）。

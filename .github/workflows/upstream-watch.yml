@@ -185,7 +185,13 @@ jobs:
 
           | package | contents |
           |---|---|
-          | `oxidns` | `/usr/bin/oxidns`, `/etc/oxidns/config.yaml`, `/usr/share/oxidns/webui/` |
+          | `oxidns` | `/usr/bin/oxidns`, `/etc/oxidns/config.yaml`, `/usr/share/oxidns/webui/` (prebuilt assets) |
+
+          The WebUI assets are taken from the official
+          `oxidns-x86_64-unknown-linux-musl.tar.gz` release archive at build
+          time - the same artifact the official Docker image and Debian package
+          consume - so the web interface works right after installation, with no
+          extra upload step.
 
           Install together with the LuCI app, which provides the procd service,
           the UCI configuration and the web interface:
@@ -198,7 +204,9 @@ jobs:
           Upstream source: https://github.com/svenshi/oxidns/releases/tag/v__VERSION__
 
           This package ships nothing that `luci-app-oxidns` also ships, so the
-          two install side by side without file conflicts.
+          two install side by side without file conflicts. LuCI's `Remove Core`
+          only deletes the core binary; the WebUI shipped here is left in place
+          so the package database stays in sync.
 
           > This build is unofficial. It is not produced, endorsed or supported
           > by the OxiDNS project; it exists only to make OxiDNS installable on

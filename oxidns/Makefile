@@ -12,9 +12,17 @@
 # Layout produced by this package (identical to the paths used by
 # luci-app-oxidns and by the official release archives):
 #
-#   /usr/bin/oxidns                core binary
-#   /etc/oxidns/config.yaml        default configuration
-#   /usr/share/oxidns/webui        WebUI asset directory (see README)
+#   /usr/bin/oxidns                        core binary
+#   /etc/oxidns/config.yaml                default configuration
+#   /usr/share/oxidns/webui/               WebUI static assets
+#
+# The WebUI is not built here. Upstream publishes it prebuilt inside every
+# release archive (webui/), and that is the artifact the official Docker image,
+# the Debian package and install.sh all consume - see
+# https://oxidns.org/webui. This Makefile downloads the x86_64 musl archive for
+# that one directory. The assets are plain HTML/CSS/JS/fonts with no native
+# code, so a single copy is correct for every architecture, and it avoids a
+# pnpm/Next.js build inside the buildroot.
 #
 # The PROCD init script (/etc/init.d/oxidns) and the UCI file
 # (/etc/config/oxidns) are deliberately NOT shipped by this package:
@@ -26,7 +34,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
 PKG_VERSION:=1.6.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
@@ -51,6 +59,34 @@ PKG_BUILD_FLAGS:=no-mips16
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk
+
+# --- WebUI assets ------------------------------------------------------------
+#
+# The WebUI ships prebuilt only inside the release archives, never in the tag
+# archive (which carries the unbuilt Next.js sources). We take it from the
+# x86_64 musl archive: upstream always publishes that one, and webui/ is
+# platform independent. The archive also carries a binary and config.yaml;
+# Build/Prepare extracts webui/ only.
+#
+# Upstream publishes no musl asset for mips/mipsel/mips64/powerpc/loongarch64/
+# riscv64, so deriving the archive name from $(ARCH) would break the build on
+# those targets. Fetching a single archive for all of them is what the official
+# Debian package and Docker image do as well.
+#
+# Download/... must come after package.mk: download.mk is what defines the
+# Download macro.
+OXIDNS_WEBUI_ARCHIVE:=oxidns-x86_64-unknown-linux-musl.tar.gz
+OXIDNS_WEBUI_URL:=https://github.com/svenshi/oxidns/releases/download/v$(PKG_VERSION)
+# Kept as its own variable so scripts/sync-upstream.sh can rewrite exactly this
+# line on a version bump without touching PKG_HASH.
+OXIDNS_WEBUI_HASH:=185d0c2ff627d0bf6154c3c2df618271d224684219a53712c3b763d5317d8c27
+
+define Download/oxidns-webui
+  FILE:=$(OXIDNS_WEBUI_ARCHIVE)
+  URL:=$(OXIDNS_WEBUI_URL)
+  HASH:=$(OXIDNS_WEBUI_HASH)
+endef
+$(eval $(call Download,oxidns-webui))
 
 # --- upstream supported architectures (see lang/rust/rust-values.mk) ---------
 OXIDNS_ARCH_DEPENDS:=@(aarch64||arm||i386||loongarch64||mips||mips64||mips64el||mipsel||powerpc||powerpc64||riscv64||x86_64)
@@ -91,13 +127,35 @@ define Package/oxidns/description
       apk add oxidns luci-app-oxidns
 
   luci-app-oxidns supplies the procd service, the UCI configuration and the LuCI
-  pages; this package only supplies the core binary and its default config.
+  pages; this package supplies the core binary, its default config and the
+  prebuilt WebUI assets.
 
   Upstream project: https://github.com/svenshi/oxidns
 endef
 
 define Package/oxidns/conffiles
 /etc/oxidns/config.yaml
+endef
+
+# --- prepare -----------------------------------------------------------------
+# Default Prepare unpacks the tag archive. The WebUI lives in a second archive,
+# so it is extracted next to the sources and installed from there.
+#
+# The archive is flat (oxidns, config.yaml, LICENSE, webui/), and only webui/
+# is kept - the binary in it is the wrong build for a cross-compiled package.
+define Build/Prepare
+	$(call Build/Prepare/Default)
+
+	rm -rf $(PKG_BUILD_DIR)/webui-dist
+	mkdir -p $(PKG_BUILD_DIR)/webui-dist
+	$(TAR) -xzf $(DL_DIR)/$(OXIDNS_WEBUI_ARCHIVE) \
+		-C $(PKG_BUILD_DIR)/webui-dist \
+		--strip-components=1 --wildcards '*/webui' '*/webui/*'
+
+	[ -f $(PKG_BUILD_DIR)/webui-dist/webui/index.html ] || { \
+		echo "WebUI index.html missing from $(OXIDNS_WEBUI_ARCHIVE)" >&2; \
+		exit 1; \
+	}
 endef
 
 # --- compile -----------------------------------------------------------------
@@ -115,9 +173,15 @@ define Package/oxidns/install
 	$(INSTALL_DIR) $(1)/etc/oxidns
 	$(INSTALL_CONF) ./files/oxidns.yaml $(1)/etc/oxidns/config.yaml
 
-	# Directory only. The WebUI is a Next.js bundle that is not part of the
-	# upstream source tree; see README.md for how to populate it.
+	# WebUI static assets, unpacked in Build/Prepare from the official
+	# release archive. CP -fpR keeps the directory tree (Next.js emits
+	# nested routes and _next/static/*). Modes are normalised afterwards:
+	# the archive only carries whatever the upstream CI runner had, and
+	# the package would otherwise ship those modes verbatim.
 	$(INSTALL_DIR) $(1)/usr/share/oxidns/webui
+	$(CP) $(PKG_BUILD_DIR)/webui-dist/webui/. $(1)/usr/share/oxidns/webui/
+	$(FIND) $(1)/usr/share/oxidns/webui -type d -exec chmod 0755 {} +
+	$(FIND) $(1)/usr/share/oxidns/webui -type f -exec chmod 0644 {} +
 endef
 
 define Package/oxidns/config

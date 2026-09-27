@@ -211,6 +211,23 @@ printf 'Feature bundle: %s\n' "$(
 	sed -n 's/^CONFIG_OXIDNS_BUNDLE_\(.*\)=y/\1/p' .config | tr 'A-Z' 'a-z' | head -n1
 )"
 
+# --- download -----------------------------------------------------------------
+
+: > "$WORKDIR/build.log"
+printf 'Full build log: %s\n' "$WORKDIR/build.log"
+
+# Fetch both archives up front (the tag archive with the sources and the
+# release archive holding the prebuilt WebUI). A digest mismatch or a missing
+# release asset then fails in seconds instead of after the Rust host toolchain
+# has been compiled for an hour.
+printf '\nDownloading package sources and the WebUI archive ...\n'
+make -j"$JOBS" package/feeds/oxidns/oxidns/download V=s >> "$WORKDIR/build.log" 2>&1 || {
+	printf '\nDownload failed. Last 60 log lines:\n\n' >&2
+	tail -n 60 "$WORKDIR/build.log" >&2
+	printf '\nFull log: %s\n' "$WORKDIR/build.log" >&2
+	exit 1
+}
+
 # --- build --------------------------------------------------------------------
 
 # Build one package and keep the full log on disk. A plain "make | tee" would
@@ -229,8 +246,6 @@ build_pkg() {
 }
 
 printf '\nBuilding oxidns. This can take a very long time ...\n'
-printf 'Full build log: %s\n' "$WORKDIR/build.log"
-: > "$WORKDIR/build.log"
 build_pkg oxidns
 
 artefacts="$(
