@@ -225,6 +225,30 @@ else
 	fail "Build/Prepare does not unpack the WebUI archive"
 fi
 
+# The release archive is flat, so the tar member list must be a plain `webui`.
+# Both alternatives were measured against the real v1.6.0 archive and fail:
+#   '*/webui' '*/webui/*' + --strip-components  -> rc=2 "Not found in archive"
+#   --wildcards 'webui' 'webui/*'               -> rc=2 on the second pattern
+# The first one broke the v1.6.0-r2 build, so guard against both regressing.
+#
+# Only recipe lines count: the Build/Prepare comment quotes both bad forms, so
+# matching the whole file would flag the documentation explaining them.
+recipe_has() {
+	grep -qE "^	.*$1" "$MAKE"
+}
+
+if recipe_has 'strip-components'; then
+	fail "Build/Prepare uses --strip-components: it would strip the webui/ level off a flat archive"
+else
+	ok "Build/Prepare does not strip path components"
+fi
+
+if recipe_has "['\"]\\*/webui"; then
+	fail "Build/Prepare uses a '*/webui' pattern, which cannot match a flat archive"
+else
+	ok "Build/Prepare does not use a parent-prefixed tar pattern"
+fi
+
 if grep -q 'PKG_BUILD_DEPENDS:=.*rust/host' "$MAKE"; then
 	ok "PKG_BUILD_DEPENDS pulls in the Rust host toolchain"
 else
@@ -428,6 +452,33 @@ else
 			ok "the release archive carries a built WebUI (webui/index.html)"
 		else
 			fail "the release archive has no webui/index.html"
+		fi
+
+		# Extract it exactly the way Build/Prepare does. A member list that
+		# matches nothing makes tar exit non-zero and fails the build - which
+		# is how v1.6.0-r2 first failed, after the Rust toolchain had already
+		# been built. Running it here catches that for the cost of a download.
+		EXTRACT_DIR="$WORK/webui-extract"
+		rm -rf "$EXTRACT_DIR"
+		mkdir -p "$EXTRACT_DIR"
+		# Read the member list out of the recipe: the tar call is a
+		# backslash-continued statement, so the members live on the line after
+		# "$(TAR) -xzf". Everything before the archive variable and after the
+		# -C argument is dropped.
+		members="$(grep -A1 '^	\$(TAR) -xzf \$(DL_DIR)/\$(OXIDNS_WEBUI_ARCHIVE)' "$MAKE" \
+			| tail -n1 \
+			| sed -e 's/.*webui-dist//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+		[ -n "$members" ] || members="webui"
+		# shellcheck disable=SC2086
+		if tar -xzf "$WEBUI_TARBALL" -C "$EXTRACT_DIR" $members 2>"$WORK/tar-extract.err"; then
+			n="$(find "$EXTRACT_DIR/webui" -type f 2>/dev/null | wc -l | tr -d ' ')"
+			if [ -f "$EXTRACT_DIR/webui/index.html" ] && [ "$n" -gt 1 ]; then
+				ok "the WebUI archive extracts with the recipe's member list [$members] ($n files)"
+			else
+				fail "extraction produced no usable WebUI ($n files under webui/)"
+			fi
+		else
+			fail "tar could not extract [$members] from the archive: $(head -n1 "$WORK/tar-extract.err" 2>/dev/null)"
 		fi
 	else
 		fail "could not download $WEBUI_URL_RESOLVED/$WEBUI_ARCHIVE ($(cat "$WORK/dl-webui.err" 2>/dev/null))"

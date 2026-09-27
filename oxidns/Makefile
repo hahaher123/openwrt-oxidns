@@ -34,7 +34,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
 PKG_VERSION:=1.6.0
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
@@ -141,16 +141,31 @@ endef
 # Default Prepare unpacks the tag archive. The WebUI lives in a second archive,
 # so it is extracted next to the sources and installed from there.
 #
-# The archive is flat (oxidns, config.yaml, LICENSE, webui/), and only webui/
-# is kept - the binary in it is the wrong build for a cross-compiled package.
+# The release archive is flat: the entries are LICENSE, config.yaml, oxidns and
+# webui/, with no wrapping top-level directory. Listing the member as plain
+# `webui` extracts the whole subtree and exits 0.
+#
+# Do NOT use the tag-archive style patterns here. Measured against the real
+# v1.6.0 musl archive:
+#   '*/webui' '*/webui/*' (--strip-components=1)  -> rc=2, "Not found in archive"
+#     (the */ prefix needs a parent dir, which a flat archive has not got -
+#      this is what broke the first v1.6.0-r2 build)
+#   --wildcards 'webui' 'webui/*'                 -> rc=2 on 'webui/*'
+#     (the second pattern matches no member on its own, and tar treats that as
+#      an error, which would fail the build)
+#   webui                                         -> rc=0, 92 files, index.html
+#
+# No --strip-components for the same reason: stripping one component would
+# remove the webui/ level itself and scatter index.html and _next/ across
+# webui-dist. Only webui/ is kept - the binary next to it is the wrong build
+# for a cross-compiled package.
 define Build/Prepare
 	$(call Build/Prepare/Default)
 
 	rm -rf $(PKG_BUILD_DIR)/webui-dist
 	mkdir -p $(PKG_BUILD_DIR)/webui-dist
 	$(TAR) -xzf $(DL_DIR)/$(OXIDNS_WEBUI_ARCHIVE) \
-		-C $(PKG_BUILD_DIR)/webui-dist \
-		--strip-components=1 --wildcards '*/webui' '*/webui/*'
+		-C $(PKG_BUILD_DIR)/webui-dist webui
 
 	[ -f $(PKG_BUILD_DIR)/webui-dist/webui/index.html ] || { \
 		echo "WebUI index.html missing from $(OXIDNS_WEBUI_ARCHIVE)" >&2; \
