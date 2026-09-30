@@ -27,6 +27,11 @@ SDK_ARCHIVE="openwrt-sdk-$SDK_VERSION-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zs
 SDK_DIR="openwrt-sdk-$SDK_VERSION-x86-64_gcc-14.3.0_musl.Linux-x86_64"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-buildtest.XXXXXX")"
+# mktemp may hand back a Windows-style path (C:\...) when TMPDIR is a Windows
+# path; everything below feeds it to POSIX tools (and compares it against what
+# build-sdk.sh derives with cd+pwd), so normalise it first - same as
+# scripts/validate.sh does.
+WORK="$(cd "$WORK" && pwd)"
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 STUB="$WORK/stub"
 mkdir -p "$STUB/bin" "$WORK/run"
@@ -147,6 +152,18 @@ has "packages feed repointed to the release branch" \
 	"^src-git packages https://git.openwrt.org/feed/packages.git;openwrt-${SDK_VERSION%.*}\$" \
 	"$SDK/feeds.conf"
 has "unrelated feeds are left pinned" 'luci.git\^1287812f4be233c5dd7f7466f534fd888785caf' "$SDK/feeds.conf"
+# The repository is a flat package layout (Makefile in the repo root) and
+# include/scan.mk turns each find hit into a package directory name by stripping
+# the SCAN_DIR prefix with sed. A Makefile in the feed root itself yields a
+# malformed name that gets dropped, so it never becomes a package - the feed must
+# point at a staging directory whose entry is named after the package instead.
+eq "the oxidns feed is a src-link to the staging directory" \
+	"$(sed -n 's|^src-link oxidns ||p' "$SDK/feeds.conf" | head -n1)" "$RUN/feed"
+if [ -f "$RUN/feed/oxidns/Makefile" ]; then
+	ok "the feed link resolves to the package Makefile"
+else
+	bad "the feed link does not resolve to $RUN/feed/oxidns/Makefile"
+fi
 has "rust version is reported" 'feeds/packages provides rust 1.96.0' "$LOG"
 has "the package is compiled" 'package/feeds/oxidns/oxidns/compile' "$STUB_MAKE_LOG"
 eq "artifact lands in -o directory" "$(ls "$OUT" 2>/dev/null | tr '\n' ' ')" "oxidns-1.5.2-r1.apk "

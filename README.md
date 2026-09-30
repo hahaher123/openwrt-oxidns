@@ -1,6 +1,6 @@
 # openwrt-oxidns
 
-[OxiDNS](https://github.com/svenshi/oxidns) 的 OpenWrt 打包仓库：在 OpenWrt 构建系统中从源码交叉编译出 `oxidns` 核心二进制。**非官方第三方打包**，构建时按 `PKG_SOURCE_URL` + `PKG_HASH` 下载并校验上游 v1.5.2 tag 归档，不重新分发源码；非 OpenWrt 平台请用上游官方安装方式。
+[OxiDNS](https://github.com/svenshi/oxidns) 的 OpenWrt 打包仓库：在 OpenWrt 构建系统中从源码交叉编译出 `oxidns` 核心二进制。**非官方第三方打包**，构建时按 `PKG_SOURCE_URL` + `PKG_HASH` 下载并校验上游对应版本的 tag 归档，不重新分发源码；非 OpenWrt 平台请用上游官方安装方式。
 
 ## 安装（设备上）
 
@@ -26,7 +26,11 @@ WebUI 是独立构建的 Next.js 静态产物，上游只随 Release 归档分�
 方式一，作为 feed 加入：
 
 ```sh
-echo "src-link oxidns /path/to/openwrt-oxidns" >> feeds.conf
+# 本仓库是扁平布局（Makefile 就在仓库根），而 feed 扫描不认 feed 根目录自身的
+# Makefile，所以要垫一层目录，用符号链接把包目录指过去
+mkdir -p /tmp/oxidns-feed
+ln -sfn /path/to/openwrt-oxidns /tmp/oxidns-feed/oxidns
+echo "src-link oxidns /tmp/oxidns-feed" >> feeds.conf
 ./scripts/feeds update oxidns && ./scripts/feeds install -a -p oxidns
 make menuconfig      # Network -> IP Addresses and Names -> oxidns
 make -j$(nproc) package/feeds/oxidns/oxidns/compile V=s

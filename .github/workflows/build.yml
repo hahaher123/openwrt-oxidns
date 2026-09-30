@@ -165,8 +165,8 @@ jobs:
       - name: Verify the built packages match the Makefile version
         run: |
           set -eu
-          pkg_version="$(sed -n 's/^PKG_VERSION:=//p' oxidns/Makefile | head -n1)"
-          pkg_release="$(sed -n 's/^PKG_RELEASE:=//p' oxidns/Makefile | head -n1)"
+          pkg_version="$(sed -n 's/^PKG_VERSION:=//p' Makefile | head -n1)"
+          pkg_release="$(sed -n 's/^PKG_RELEASE:=//p' Makefile | head -n1)"
           printf 'Makefile says %s-r%s\n' "$pkg_version" "$pkg_release"
           sh scripts/check-apk-version.sh "${pkg_version}-r${pkg_release}" out/*.apk
 

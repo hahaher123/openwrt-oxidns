@@ -4,7 +4,7 @@
 # Bump this package to an upstream OxiDNS release.
 #
 # It reads the version from the tarball (not from the release name), recomputes
-# PKG_HASH and rewrites oxidns/Makefile. The WebUI comes from the release
+# PKG_HASH and rewrites the Makefile. The WebUI comes from the release
 # archive rather than from the sources, so its hash is recomputed here too -
 # miss that and the build fails on a checksum mismatch.
 #
@@ -18,11 +18,11 @@
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MAKE="$REPO_ROOT/oxidns/Makefile"
+MAKE="$REPO_ROOT/Makefile"
 UPSTREAM_REPO="svenshi/oxidns"
 PROXY="${OXIDNS_PROXY:-}"
 
-# Must match OXIDNS_WEBUI_ARCHIVE in oxidns/Makefile.
+# Must match OXIDNS_WEBUI_ARCHIVE in the Makefile.
 WEBUI_ARCHIVE="oxidns-x86_64-unknown-linux-musl.tar.gz"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-sync.XXXXXX")"

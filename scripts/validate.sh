@@ -16,7 +16,9 @@
 
 set -eu
 
-PKG_DIR="oxidns"
+# 扁平布局：包定义（Makefile / Config.in / files）就在仓库根目录，所以包目录是 "."。
+# 下面所有 "$PKG_DIR/xxx" 因此展开成 "./xxx"。
+PKG_DIR="."
 MAKE="$PKG_DIR/Makefile"
 UPSTREAM_REPO="svenshi/oxidns"
 

@@ -146,8 +146,56 @@ if grep -q "^src-git\(-full\)\{0,1\} packages[[:space:]]" feeds.conf; then
 	}
 fi
 
-if ! grep -q "src-link oxidns $REPO_ROOT" feeds.conf; then
-	printf 'src-link oxidns %s\n' "$REPO_ROOT" >> feeds.conf
+# This repository is a flat package layout: Makefile, Config.in and files/ all sit
+# in the repo root. A feed index is built by include/scan.mk, which collects the
+# candidates with
+#
+#   find -L $(SCAN_DIR) -mindepth 1 -maxdepth 5 -name Makefile
+#
+# and then normalises every hit into a package directory name with
+#
+#   sed -e 's#^$(SCAN_DIR)/##' -e 's#/Makefile:.*##'
+#
+# For a Makefile sitting in the feed root itself the first sed strips the prefix
+# and leaves a bare "Makefile:...", the second one matches nothing, and the entry
+# reaches the index as a malformed path that gets dropped - that is why a feed
+# root Makefile never becomes a package. (find does list it; the depth option is
+# not what filters it out.) Pointing src-link straight at $REPO_ROOT would
+# therefore index nothing at all.
+#
+# So insert one directory level holding a symlink back to the repo: the link name
+# becomes the package directory, and the scan sees <feed root>/oxidns/Makefile.
+# find runs with -L, so the symlink is followed.
+feed_root="$WORKDIR/feed"
+mkdir -p "$feed_root"
+if [ -e "$feed_root/oxidns" ]; then
+	rm -rf "$feed_root/oxidns"
+fi
+ln -s "$REPO_ROOT" "$feed_root/oxidns"
+if [ ! -f "$feed_root/oxidns/Makefile" ]; then
+	# Windows/git-bash cannot create directory symlinks without developer mode:
+	# ln -s leaves an empty directory behind. Fall back to a copy of the working
+	# tree (minus .git) so the same script is usable from a local MSYS shell too.
+	# On Linux - the supported build host - this branch never runs.
+	rm -rf "$feed_root/oxidns"
+	mkdir -p "$feed_root/oxidns"
+	# Copy the working tree, skipping .git: a copy of the object store is useless
+	# here and it is the only thing that would make the copy large.
+	for entry in "$REPO_ROOT"/* "$REPO_ROOT"/.[!.]*; do
+		[ -e "$entry" ] || continue
+		case "${entry##*/}" in
+			.git) continue ;;
+		esac
+		cp -R "$entry" "$feed_root/oxidns/"
+	done
+fi
+[ -f "$feed_root/oxidns/Makefile" ] || {
+	echo "the staging feed directory does not contain the package: $feed_root/oxidns/Makefile" >&2
+	exit 1
+}
+
+if ! grep -q "src-link oxidns $feed_root" feeds.conf; then
+	printf 'src-link oxidns %s\n' "$feed_root" >> feeds.conf
 fi
 
 printf 'Updating feeds ...\n'
