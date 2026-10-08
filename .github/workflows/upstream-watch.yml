@@ -9,6 +9,11 @@ name: upstream-watch
 # A local fix that only bumps PKG_RELEASE therefore gets its own tag instead of
 # silently overwriting the previous release (dispatch with `force` to publish it).
 #
+# Release notes list only what changed: the upstream version bump plus any repo
+# commits since the previous release tag. Package contents, WebUI provenance,
+# install steps and the unofficial-build notice live in README.md - keeping a
+# second copy here is how the two drift apart.
+#
 # The probe itself is cheap (two HTTP requests), so a "nothing changed" day
 # costs seconds. Only `changed == true` starts the expensive build.
 
@@ -128,9 +133,13 @@ jobs:
       # gh derives the target repository from the git remote. Follow the branch
       # tip so the Makefile read here agrees with the packages just built (the
       # probe job pushed the version bump after the run started).
+      #
+      # fetch-depth 0 also brings the tags: the notes step walks
+      # `<previous release tag>..HEAD` to list the repo-side changes.
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
       - name: Download packages
         uses: actions/download-artifact@v4
@@ -170,49 +179,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
           RELEASE: ${{ needs.check.outputs.release }}
+          PREVIOUS: ${{ needs.check.outputs.previous }}
         run: |
           set -eu
           # 完整包版本 = PKG_VERSION-PKG_RELEASE。tag 必须带上 -r，否则同一上游版本下
           # 只升 PKG_RELEASE（修 bug / 改安装产物）会撞上已有 tag，变成静默覆盖旧 Release。
           tag="v$VERSION-r$RELEASE"
 
-          # Quoted heredoc: keep the markdown backticks literal, inject the
-          # version afterwards instead.
-          cat > notes.md <<'NOTES'
-          OxiDNS **__VERSION__** compiled from source inside the OpenWrt build
-          system. Target `x86/64`, OpenWrt 25.12 (SDK 25.12.5), `apk` packages.
-          Package version: `__PKGVER__`.
+          # 正文只写本次变动。包内容 / WebUI 来源 / 安装步骤 / 非官方声明都在
+          # README.md 里，不再往这里抄一份 —— 抄来的副本迟早和 README 漂移。
+          if [ "$PREVIOUS" = "$VERSION" ]; then
+            # force 重编：上游版本没动，变的只是包本身。
+            printf '上游仍为 `v%s`，包 `%s-r%s` 重新编译（OpenWrt 25.12 / x86_64）。\n\n' \
+              "$VERSION" "$VERSION" "$RELEASE" > notes.md
+          else
+            printf '上游 OxiDNS `v%s` → `v%s`，包 `%s-r%s` 重新编译（OpenWrt 25.12 / x86_64）。\n\n' \
+              "$PREVIOUS" "$VERSION" "$VERSION" "$RELEASE" > notes.md
+            printf '上游变更：https://github.com/svenshi/oxidns/compare/v%s...v%s\n\n' \
+              "$PREVIOUS" "$VERSION" >> notes.md
+          fi
 
-          | package | contents |
-          |---|---|
-          | `oxidns` | `/usr/bin/oxidns`, `/etc/oxidns/config.yaml`, `/usr/share/oxidns/webui/` (prebuilt assets) |
+          # 本次发版包含的仓库内改动 = 上一个 release tag 到 HEAD 之间的提交，
+          # 跳过探测任务自己推的那条版本 bump（它说明的信息上一段已经写了）。
+          prev_tag="$(git tag --list 'v*-r*' --sort=-v:refname | head -n1)"
+          if [ -n "$prev_tag" ] && git cat-file -e "${prev_tag}^{commit}" 2>/dev/null; then
+            changes="$(git log --no-merges --pretty=format:'- %s' \
+              --invert-grep --grep='^oxidns: update to ' "${prev_tag}..HEAD")"
+            if [ -n "$changes" ]; then
+              printf '包内改动：\n%s\n\n' "$changes" >> notes.md
+            fi
+          fi
 
-          The WebUI assets are taken from the official
-          `oxidns-x86_64-unknown-linux-musl.tar.gz` release archive at build
-          time - the same artifact the official Docker image and Debian package
-          consume - so the web interface works right after installation, with no
-          extra upload step.
+          printf '包内容与安装方式见 [README](%s/%s#readme)。\n' \
+            "${GITHUB_SERVER_URL:-https://github.com}" "${GITHUB_REPOSITORY:-}" >> notes.md
 
-          Install together with the LuCI app, which provides the procd service,
-          the UCI configuration and the web interface:
-
-          ```
-          apk add oxidns luci-app-oxidns
-          /etc/init.d/rpcd restart
-          ```
-
-          Upstream source: https://github.com/svenshi/oxidns/releases/tag/v__VERSION__
-
-          This package ships nothing that `luci-app-oxidns` also ships, so the
-          two install side by side without file conflicts. LuCI's `Remove Core`
-          only deletes the core binary; the WebUI shipped here is left in place
-          so the package database stays in sync.
-
-          > This build is unofficial. It is not produced, endorsed or supported
-          > by the OxiDNS project; it exists only to make OxiDNS installable on
-          > OpenWrt.
-          NOTES
-          sed -i -e "s/__VERSION__/$VERSION/g" -e "s/__PKGVER__/$VERSION-r$RELEASE/g" notes.md
+          cat notes.md
+          echo '-----------------------------'
 
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release $tag already exists - uploading assets"
