@@ -33,15 +33,15 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
-PKG_VERSION:=1.6.0
-PKG_RELEASE:=3
+PKG_VERSION:=1.6.1
+PKG_RELEASE:=1
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
 # which matches the default PKG_BUILD_DIR.
 PKG_SOURCE:=v$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/svenshi/oxidns/archive/refs/tags
-PKG_HASH:=7633d6377082f58a61cd301ed02635fa36ac33a75783ef7647bfa7030c3b33c5
+PKG_HASH:=6f7e02f45b9b7842a2f9478b9ddb91c445efecc84a0b543f84e3b953bd262f9a
 
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
@@ -79,7 +79,7 @@ OXIDNS_WEBUI_ARCHIVE:=oxidns-x86_64-unknown-linux-musl.tar.gz
 OXIDNS_WEBUI_URL:=https://github.com/svenshi/oxidns/releases/download/v$(PKG_VERSION)
 # Kept as its own variable so scripts/sync-upstream.sh can rewrite exactly this
 # line on a version bump without touching PKG_HASH.
-OXIDNS_WEBUI_HASH:=185d0c2ff627d0bf6154c3c2df618271d224684219a53712c3b763d5317d8c27
+OXIDNS_WEBUI_HASH:=2ac8e103e03407a73c29da848f6ce2d524e751ce1da8a744aa9168fc1384e3b0
 
 define Download/oxidns-webui
   FILE:=$(OXIDNS_WEBUI_ARCHIVE)
