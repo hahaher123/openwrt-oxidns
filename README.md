@@ -4,7 +4,7 @@
 
 ## 安装（设备上）
 
-与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）与 `/usr/share/oxidns/webui/` 下的 WebUI 静态资源；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
+与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）、`/usr/share/oxidns/webui/` 下的 WebUI 静态资源，以及 `/lib/upgrade/keep.d/oxidns` —— 最后这个让整盘 sysupgrade 保留 `/etc/oxidns/` 下的 `geoip.dat` / `geosite.dat` 与 `rule/*.txt`，否则升级后守护进程会因缺数据起不来；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
 
 ```sh
 apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
