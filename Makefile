@@ -41,7 +41,7 @@ PKG_RELEASE:=2
 # which matches the default PKG_BUILD_DIR.
 PKG_SOURCE:=v$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/svenshi/oxidns/archive/refs/tags
-PKG_HASH:=6f7e02f45b9b7842a2f9478b9ddb91c445efecc84a0b543f84e3b953bd262f9a
+PKG_HASH:=16538d784e0cbbc09672f34af8f86f86bf0ce594632bab119c73f5954121f115
 
 PKG_LICENSE:=GPL-3.0-or-later
 PKG_LICENSE_FILES:=LICENSE
