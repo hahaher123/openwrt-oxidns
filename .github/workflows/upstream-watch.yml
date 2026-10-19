@@ -26,7 +26,7 @@ on:
       sdk_version:
         description: OpenWrt release to build against
         required: true
-        default: '25.12.5'
+        default: '25.12.6'
       force:
         description: 'Build and publish even if upstream has no new version'
         required: true
@@ -118,7 +118,7 @@ jobs:
       actions: read
     uses: ./.github/workflows/build.yml
     with:
-      sdk_version: ${{ inputs.sdk_version || '25.12.5' }}
+      sdk_version: ${{ inputs.sdk_version || '25.12.6' }}
       targets: '["x86/64"]'
 
   publish:

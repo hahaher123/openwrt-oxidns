@@ -18,7 +18,7 @@
 # Usage:
 #   sh scripts/build-sdk.sh                            # x86/64, default release
 #   sh scripts/build-sdk.sh -t armsr/armv8
-#   sh scripts/build-sdk.sh -t x86/64 -v 25.12.5 -j 8
+#   sh scripts/build-sdk.sh -t x86/64 -v 25.12.6 -j 8
 #   sh scripts/build-sdk.sh -o /srv/out
 
 set -eu
@@ -26,7 +26,7 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 TARGET="x86/64"
-SDK_VERSION="25.12.5"
+SDK_VERSION="25.12.6"
 JOBS="$( (nproc 2>/dev/null || echo 4) )"
 WORKDIR="${OXIDNS_WORKDIR:-$HOME/.cache/openwrt-oxidns}"
 OUTDIR=""
@@ -43,7 +43,7 @@ Usage: sh scripts/build-sdk.sh [options]
 
   -t <target>    OpenWrt target, e.g. x86/64, armsr/armv8, ramips/mt7621
                  (default: $TARGET)
-  -v <version>   OpenWrt release to use, e.g. 25.12.5
+  -v <version>   OpenWrt release to use, e.g. 25.12.6
                  (default: $SDK_VERSION)
   -j <jobs>      parallel make jobs (default: CPU count)
   -w <dir>       working directory for SDK and downloads
@@ -77,7 +77,7 @@ case "$TARGET" in
 	*) echo "-t expects <target>/<subtarget>, e.g. x86/64" >&2; exit 1 ;;
 esac
 
-# 25.12.5 -> 25.12, used to pick the matching feed branch below.
+# 25.12.6 -> 25.12, used to pick the matching feed branch below.
 SDK_SERIES="${SDK_VERSION%.*}"
 
 command -v tar >/dev/null 2>&1 || { echo "missing required tool: tar" >&2; exit 1; }

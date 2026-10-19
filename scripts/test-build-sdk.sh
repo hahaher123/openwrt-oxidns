@@ -179,7 +179,7 @@ fi
 has "packages feed repointed" 'openwrt-25.12' "$SDK/feeds.conf"
 eq "artifact lands in -o directory" "$(ls "$OUT" 2>/dev/null | tr '\n' ' ')" "oxidns-1.5.2-r1.apk "
 
-printf '\n3. feed carries rust 1.94, the version the 25.12.5 SDK pins\n'
+printf '\n3. feed carries rust 1.94 (too old for sysinfo 0.39)\n'
 run_case t3 1.94.0 no
 if [ "$RC" != "0" ]; then ok "fails instead of building"; else bad "exited 0"; fi
 has "names the offending version" 'rust 1.94.0 is too old' "$LOG"

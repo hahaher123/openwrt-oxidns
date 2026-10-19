@@ -39,7 +39,7 @@ make -j$(nproc) package/feeds/oxidns/oxidns/compile V=s
 方式二，一条命令下官方 SDK 自动构建（自动修 feed、校验 rust 版本、收集产物到 ./out）：
 
 ```sh
-sh scripts/build-sdk.sh -t x86/64 -v 25.12.5 -o ./out
+sh scripts/build-sdk.sh -t x86/64 -v 25.12.6 -o ./out
 ```
 
 ## 编译选项

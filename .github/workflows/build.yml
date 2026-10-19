@@ -24,7 +24,7 @@ on:
       sdk_version:
         description: OpenWrt release to build against
         required: true
-        default: '25.12.5'
+        default: '25.12.6'
       targets:
         description: 'JSON array of target/subtarget pairs'
         required: true
@@ -35,7 +35,7 @@ on:
         description: OpenWrt release to build against
         type: string
         required: false
-        default: '25.12.5'
+        default: '25.12.6'
       targets:
         description: 'JSON array of target/subtarget pairs'
         type: string
@@ -57,7 +57,7 @@ jobs:
         target: ${{ fromJSON(inputs.targets || '["x86/64"]') }}
 
     env:
-      SDK_VERSION: ${{ inputs.sdk_version || '25.12.5' }}
+      SDK_VERSION: ${{ inputs.sdk_version || '25.12.6' }}
 
     steps:
       # Check out the branch tip, not github.sha.
