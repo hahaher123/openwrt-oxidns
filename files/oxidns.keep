@@ -1,0 +1,11 @@
+# Paths kept across sysupgrade for oxidns.
+#
+# /etc/oxidns/ holds the default config plus everything the daemon needs at
+# runtime that the package itself does NOT install:
+#   geoip.dat / geosite.dat   GeoIP/GeoSite databases fetched by the user
+#                             (tens of MB; missing => oxidns refuses to start)
+#   rule/*.txt                routing rules maintained on the device
+#
+# None of it is a conffile, and no other package claims it in keep.d, so
+# without this file every full sysupgrade silently wipes the daemon's inputs.
+/etc/oxidns/

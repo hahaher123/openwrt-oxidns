@@ -34,7 +34,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
 PKG_VERSION:=1.6.1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
@@ -197,6 +197,13 @@ define Package/oxidns/install
 	$(CP) $(PKG_BUILD_DIR)/webui-dist/webui/. $(1)/usr/share/oxidns/webui/
 	$(FIND) $(1)/usr/share/oxidns/webui -type d -exec chmod 0755 {} +
 	$(FIND) $(1)/usr/share/oxidns/webui -type f -exec chmod 0644 {} +
+
+	# keep.d: /etc/oxidns/ holds geoip.dat / geosite.dat and rule/*.txt —
+	# runtime data the package does not ship. Nothing else claims it, so
+	# without this entry every full sysupgrade wipes it and the daemon
+	# fails to start (seen on the 25.12.5 -> 25.12.6 upgrade).
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/oxidns.keep $(1)/lib/upgrade/keep.d/oxidns
 endef
 
 define Package/oxidns/config
