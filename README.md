@@ -4,7 +4,7 @@
 
 ## 安装（设备上）
 
-与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）、`/usr/share/oxidns/webui/` 下的 WebUI 静态资源，以及 `/lib/upgrade/keep.d/oxidns` —— 最后这个让整盘 sysupgrade 保留 `/etc/oxidns/` 下的 `geoip.dat` / `geosite.dat` 与 `rule/*.txt`，否则升级后守护进程会因缺数据起不来；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
+与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）、`/usr/share/oxidns/webui/` 下的 WebUI 静态资源，以及 `/lib/upgrade/keep.d/oxidns` —— 最后这个让整盘 sysupgrade 保留 `/etc/oxidns/` 下你自己维护的 `rule/*.txt`；地理数据已统一放到 `/usr/share/v2ray/`，见「地理数据」一节；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
 
 ```sh
 apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
@@ -18,6 +18,73 @@ apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
 ## WebUI 来源
 
 WebUI 是独立构建的 Next.js 静态产物，上游只随 Release 归档分发预构建的 `webui/`，源码 tag 归档里只有未构建的前端源码。本包在构建时下载官方 `oxidns-x86_64-unknown-linux-musl.tar.gz` 并只取其中的 `webui/` 装入 `/usr/share/oxidns/webui/`——与官方 Docker 镜像、Debian 包取的是同一份产物。前端资源平台无关，全架构共用一份，也免去在 buildroot 里跑 pnpm。
+
+## 地理数据（geoip.dat / geosite.dat）
+
+整机只有一份，落在 `/usr/share/v2ray/`：
+
+| 文件 | 提供者 | 更新者 |
+| --- | --- | --- |
+| `/usr/share/v2ray/geoip.dat` | 镜像里的 `v2ray-geoip` 包 | **本包**（oxidns 的 `download` 插件） |
+| `/usr/share/v2ray/geosite.dat` | 镜像里的 `v2ray-geosite` 包 | 同上 |
+
+两个包只保证「文件有 apk 归属」；实际内容在镜像构建时被替换成
+[Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 的最新发布。
+运行期刷新由 oxidns 做，mihomo 不参与、也不再打包这两份文件。
+
+provider 直接指向该目录：
+
+```yaml
+plugins:
+  - tag: geosite_proxy
+    type: geosite
+    args:
+      file: "/usr/share/v2ray/geosite.dat"
+      selectors: ["google", "gfw"]
+
+  - tag: geoip_cn
+    type: geoip
+    args:
+      file: "/usr/share/v2ray/geoip.dat"
+      selectors: ["cn"]
+```
+
+刷新任务（144 小时一次；`startup_if_missing` 让文件缺失时立即补齐）：
+
+```yaml
+plugins:
+  - tag: subscription_cron
+    type: cron
+    args:
+      timezone: "Asia/Shanghai"
+      jobs:
+        - name: refresh_rules
+          interval: 144h
+          executors:
+            - "$subscription_refresh"
+
+  - tag: subscription_refresh
+    type: sequence
+    args:
+      - exec: "$subscription_download"
+      - exec: "$reload_rule_providers"
+
+  - tag: subscription_download
+    type: download
+    args:
+      timeout: 60s
+      startup_if_missing: true
+      downloads:
+        - url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
+          dir: "/usr/share/v2ray"
+          filename: "geosite.dat"
+        - url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+          dir: "/usr/share/v2ray"
+          filename: "geoip.dat"
+```
+
+分工要记清：`/usr/share/v2ray/` 属于镜像（sysupgrade 后会被刷新成新的出厂数据），
+自维护规则放 `/etc/oxidns/rule/*.txt`（keep.d 保留）。
 
 ## 从源码构建
 
