@@ -74,6 +74,8 @@ plugins:
     args:
       timeout: 60s
       startup_if_missing: true
+      # 必填项，理由见下文「自举死锁」。
+      socks5: "127.0.0.1:7890"
       downloads:
         - url: "https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
           dir: "/usr/share/v2ray"
@@ -86,6 +88,26 @@ plugins:
 下载源用 `fastly.jsdelivr.net` 而不是 `cdn.jsdelivr.net`：后者在国内节点偶发返回 HTML 错误页
 （HTTP 200 + 网页正文），而 `download` 插件不校验内容，一旦写坏就是坏 geo 数据；
 fastly 节点实测稳定。两条都下载完才 `reload_rule_providers`，中途失败不会半更新。
+
+### 为什么 `socks5` 是必填的（自举死锁）
+
+`startup_if_missing` 默认 `true`：启动时发现目标文件缺失，会在其它插件初始化**之前**先下载，
+**下载失败直接中止启动**。而下载要先解析 `fastly.jsdelivr.net` —— 本机 `/etc/resolv.conf`
+指向 `127.0.0.1`，也就是 oxidns 自己，此刻 53 端口还没起来。于是：
+
+```
+startup download failed … client error (Connect)
+→ procd: Instance oxidns::instance1 s in a crash loop
+```
+
+实测 crash loop 7 次、全内网 DNS 中断。配上 `socks5` 后，域名原样交给代理远端解析
+（`infra/network/http_client.rs`：`proxy` 存在且没有自定义 resolver 时不本地解析，
+`TargetAddr::Domain` 直接进 SOCKS5 握手），死锁解除 —— 实测启动 6 秒内补齐 11 MB 的
+`geosite.dat`，且内容 sha256 与预期一致。
+
+端口前提：mihomo 必须是 **`mixed-port`**，HTTP 与 SOCKS5 共用同一端口。
+若写的是 `port: 7890` + `socks-port: 7891`，7890 只接受 HTTP，SOCKS5 握手会一直挂到超时
+（实测 40 s 仍 `http=000`）；这种情况下 `socks5` 要指向 7891。
 
 分工要记清：`/usr/share/v2ray/` 由镜像里的 `v2ray-geoip` / `v2ray-geosite` 提供、**oxidns 负责刷新**，
 `/etc/oxidns/rule/*.txt` 是自维护规则；两者都在 `keep.d` 里，整盘 sysupgrade 都保留。
