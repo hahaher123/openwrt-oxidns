@@ -4,7 +4,7 @@
 
 ## 安装（设备上）
 
-与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）、`/usr/share/oxidns/webui/` 下的 WebUI 静态资源，以及 `/lib/upgrade/keep.d/oxidns` —— 最后这个让整盘 sysupgrade 保留 `/etc/oxidns/` 下你自己维护的 `rule/*.txt`；地理数据已统一放到 `/usr/share/v2ray/`，见「地理数据」一节；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
+与 [luci-app-oxidns](https://github.com/hahaher123/luci-app-oxidns) 配合使用。两个包文件零重叠（本包只装 `/usr/bin/oxidns`、`/etc/oxidns/config.yaml`（conffile）、`/usr/share/oxidns/webui/` 下的 WebUI 静态资源，以及 `/lib/upgrade/keep.d/oxidns` —— 最后这个让整盘 sysupgrade 保留 `/etc/oxidns/` 下你自己维护的 `rule/*.txt`；服务脚本与 UCI 由 luci-app-oxidns 提供），可同时安装：
 
 ```sh
 apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
@@ -18,99 +18,6 @@ apk add oxidns luci-app-oxidns      # 需要 OpenWrt 25.12 或更新版本
 ## WebUI 来源
 
 WebUI 是独立构建的 Next.js 静态产物，上游只随 Release 归档分发预构建的 `webui/`，源码 tag 归档里只有未构建的前端源码。本包在构建时下载官方 `oxidns-x86_64-unknown-linux-musl.tar.gz` 并只取其中的 `webui/` 装入 `/usr/share/oxidns/webui/`——与官方 Docker 镜像、Debian 包取的是同一份产物。前端资源平台无关，全架构共用一份，也免去在 buildroot 里跑 pnpm。
-
-## 地理数据（geoip.dat / geosite.dat）
-
-整机只有一份，落在 `/usr/share/v2ray/`：
-
-| 文件 | 提供者 | 更新者 |
-| --- | --- | --- |
-| `/usr/share/v2ray/geoip.dat` | `v2ray-geoip` 包（本包的硬依赖） | **本包**（oxidns 的 `download` 插件） |
-| `/usr/share/v2ray/geosite.dat` | `v2ray-geosite` 包（本包的硬依赖） | 同上 |
-
-两个包只保证「文件有 apk 归属」；实际内容在镜像构建时被替换成
-[Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 的最新发布。
-运行期刷新由 oxidns 做，mihomo 不参与、也不再打包这两份文件。
-
-provider 直接指向该目录：
-
-```yaml
-plugins:
-  - tag: geosite_proxy
-    type: geosite
-    args:
-      file: "/usr/share/v2ray/geosite.dat"
-      selectors: ["google", "gfw"]
-
-  - tag: geoip_cn
-    type: geoip
-    args:
-      file: "/usr/share/v2ray/geoip.dat"
-      selectors: ["cn"]
-```
-
-刷新任务（144 小时一次；`startup_if_missing` 让文件缺失时立即补齐）：
-
-```yaml
-plugins:
-  - tag: subscription_cron
-    type: cron
-    args:
-      timezone: "Asia/Shanghai"
-      jobs:
-        - name: refresh_rules
-          interval: 144h
-          executors:
-            - "$subscription_refresh"
-
-  - tag: subscription_refresh
-    type: sequence
-    args:
-      - exec: "$subscription_download"
-      - exec: "$reload_rule_providers"
-
-  - tag: subscription_download
-    type: download
-    args:
-      timeout: 60s
-      startup_if_missing: true
-      # 必填项，理由见下文「自举死锁」。
-      socks5: "127.0.0.1:7890"
-      downloads:
-        - url: "https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
-          dir: "/usr/share/v2ray"
-          filename: "geosite.dat"
-        - url: "https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
-          dir: "/usr/share/v2ray"
-          filename: "geoip.dat"
-```
-
-下载源用 `fastly.jsdelivr.net` 而不是 `cdn.jsdelivr.net`：后者在国内节点偶发返回 HTML 错误页
-（HTTP 200 + 网页正文），而 `download` 插件不校验内容，一旦写坏就是坏 geo 数据；
-fastly 节点实测稳定。两条都下载完才 `reload_rule_providers`，中途失败不会半更新。
-
-### 为什么 `socks5` 是必填的（自举死锁）
-
-`startup_if_missing` 默认 `true`：启动时发现目标文件缺失，会在其它插件初始化**之前**先下载，
-**下载失败直接中止启动**。而下载要先解析 `fastly.jsdelivr.net` —— 本机 `/etc/resolv.conf`
-指向 `127.0.0.1`，也就是 oxidns 自己，此刻 53 端口还没起来。于是：
-
-```
-startup download failed … client error (Connect)
-→ procd: Instance oxidns::instance1 s in a crash loop
-```
-
-实测 crash loop 7 次、全内网 DNS 中断。配上 `socks5` 后，域名原样交给代理远端解析
-（`infra/network/http_client.rs`：`proxy` 存在且没有自定义 resolver 时不本地解析，
-`TargetAddr::Domain` 直接进 SOCKS5 握手），死锁解除 —— 实测启动 6 秒内补齐 11 MB 的
-`geosite.dat`，且内容 sha256 与预期一致。
-
-端口前提：mihomo 必须是 **`mixed-port`**，HTTP 与 SOCKS5 共用同一端口。
-若写的是 `port: 7890` + `socks-port: 7891`，7890 只接受 HTTP，SOCKS5 握手会一直挂到超时
-（实测 40 s 仍 `http=000`）；这种情况下 `socks5` 要指向 7891。
-
-分工要记清：`/usr/share/v2ray/` 由镜像里的 `v2ray-geoip` / `v2ray-geosite` 提供、**oxidns 负责刷新**，
-`/etc/oxidns/rule/*.txt` 是自维护规则；两者都在 `keep.d` 里，整盘 sysupgrade 都保留。
 
 ## 从源码构建
 
