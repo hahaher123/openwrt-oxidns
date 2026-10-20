@@ -48,10 +48,19 @@ sh scripts/build-sdk.sh -t x86/64 -v 25.12.6 -o ./out
 
 ## 自动化
 
-`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH` / `OXIDNS_WEBUI_HASH`、用 SDK 编译 x86/64 并发布 Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`，附件 .apk）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
+`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH` / `OXIDNS_WEBUI_HASH`、用 SDK 编译 **`BUILD_TARGETS` 里的全部目标**并发布同一个 Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`，附件 .apk）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
+
+当前目标：
+
+| target | 包架构 | 文件名后缀 | 适用 |
+|---|---|---|---|
+| `x86/64` | `x86_64` | `_x86_64` | PC / PVE 虚拟机 |
+| `rockchip/armv8` | `aarch64_generic` | `_aarch64_generic` | NanoPi R2S（`friendlyarm_nanopi-r2s`）等 RK3328/RK3399 |
+
+多目标时 apk 文件名带架构后缀（`oxidns-1.6.1-r2_aarch64_generic.apk`），否则两个 target 的同名文件在 Release 里会撞。加架构只需改 `upstream-watch.yml` 的 `BUILD_TARGETS` 一处 —— 构建矩阵与 Release 正文/标题都从它派生。
 
 ## 已知限制
 
-- 仅支持 OpenWrt 官方 Rust 包覆盖的架构（aarch64 / x86_64 / mipsel / riscv64 等）；自动化只产出 x86/64，其它架构用 `build-sdk.sh -t <目标>` 自编。
+- 仅支持 OpenWrt 官方 Rust 包覆盖的架构（aarch64 / x86_64 / mipsel / riscv64 等）；自动化产出上表两目标，其它架构用 `build-sdk.sh -t <目标>` 自编。
 - OpenWrt 24.10 及更早无法编译（rust 过旧）。
 - WebUI 取自上游 Release 归档，无法脱离上游构建；上游若某版本漏发 musl 归档，该版本构建会失败（`build` 阶段直接报错，不会静默出空目录）。

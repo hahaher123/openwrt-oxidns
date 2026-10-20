@@ -1,6 +1,6 @@
 name: build
 
-# Builds the OxiDNS OpenWrt packages (x86/64 -> .apk) from source.
+# Builds the OxiDNS OpenWrt packages (multi-target -> .apk) from source.
 #
 # Callers:
 #   * .github/workflows/upstream-watch.yml  - daily upstream probe, auto build
@@ -28,7 +28,7 @@ on:
       targets:
         description: 'JSON array of target/subtarget pairs'
         required: true
-        default: '["x86/64"]'
+        default: '["x86/64","rockchip/armv8"]'
   workflow_call:
     inputs:
       sdk_version:
@@ -40,7 +40,7 @@ on:
         description: 'JSON array of target/subtarget pairs'
         type: string
         required: false
-        default: '["x86/64"]'
+        default: '["x86/64","rockchip/armv8"]'
 
 permissions:
   contents: read
@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.targets || '["x86/64"]') }}
+        target: ${{ fromJSON(inputs.targets || '["x86/64","rockchip/armv8"]') }}
 
     env:
       SDK_VERSION: ${{ inputs.sdk_version || '25.12.6' }}
@@ -77,7 +77,18 @@ jobs:
           # "x86-64" (a "/" is not allowed in artifact names) here.
           id="$(printf '%s' '${{ matrix.target }}' | tr '/' '-')"
           echo "TARGET_ID=$id" >> "$GITHUB_ENV"
-          echo "target: ${{ matrix.target }} -> id: $id" >> "$GITHUB_STEP_SUMMARY"
+
+          # Package architecture, used as the apk file-name suffix. Two targets
+          # produce the same file name otherwise (both are "oxidns-<ver>.apk"),
+          # and a Release cannot hold two assets with one name. Use the package
+          # arch rather than the target name so the file says what it runs on.
+          case '${{ matrix.target }}' in
+            x86/64)          arch=x86_64 ;;
+            rockchip/armv8)  arch=aarch64_generic ;;
+            *)               arch="$(printf '%s' '${{ matrix.target }}' | tr '/' '_')" ;;
+          esac
+          echo "ARCH_ID=$arch" >> "$GITHUB_ENV"
+          echo "target: ${{ matrix.target }} -> id: $id, arch: $arch" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Free disk space
         run: |
@@ -158,6 +169,21 @@ jobs:
             ls -l out 2>/dev/null || echo '(none)'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # 每个 target 都产出 oxidns-<ver>.apk，多架构时同名资产在 Release 里会撞。
+      # 加包架构后缀后，dist/ 里两个文件共存，Release 也各占一个资产。
+      - name: Suffix packages with the package architecture
+        run: |
+          set -eu
+          for f in out/*.apk; do
+            [ -e "$f" ] || continue
+            base="$(basename "$f" .apk)"
+            case "$base" in
+              *_"$ARCH_ID") continue ;;   # 已经带过就别重复加
+            esac
+            mv "$f" "out/${base}_${ARCH_ID}.apk"
+          done
+          ls -l out
 
       # Fail here rather than publish a package whose contents do not match the
       # version the caller is about to tag it with. The packages must carry the

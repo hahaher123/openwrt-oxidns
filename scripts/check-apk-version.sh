@@ -46,13 +46,19 @@ for apk in "$@"; do
 	checked=$((checked + 1))
 	base="$(basename "$apk")"
 
-	# 1) the file name must end in -<version>.apk
+	# 1) the file name must carry -<version>, optionally followed by _<arch>.
+	#
+	# 多架构构建会给文件名加包架构后缀（oxidns-1.6.1-r2_x86_64.apk），否则两个
+	# target 产出的同名 apk 在同一个 Release 里会撞车。两种形式都算通过。
 	case "$base" in
 		*"-$want.apk")
 			echo "  ok   $base: file name carries $want"
 			;;
+		*"-$want"_*.apk)
+			echo "  ok   $base: file name carries $want (arch-suffixed)"
+			;;
 		*)
-			echo "  FAIL $base: file name does not end in -$want.apk" >&2
+			echo "  FAIL $base: file name does not carry -$want (optionally _<arch>)" >&2
 			failures=$((failures + 1))
 			continue
 			;;

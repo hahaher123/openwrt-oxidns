@@ -523,6 +523,21 @@ else
 	ok "checker rejects a mismatching version"
 fi
 
+# 多架构构建会给文件名加包架构后缀（两个 target 否则会产出同名 apk）。
+: > "$SELFTEST/oxidns-1.6.0-r1_x86_64.apk"
+if sh "$CHECKER" v1.6.0-r1 "$SELFTEST/oxidns-1.6.0-r1_x86_64.apk" >/dev/null 2>&1; then
+	ok "checker accepts an arch-suffixed file name"
+else
+	fail "checker rejected an arch-suffixed file name"
+fi
+
+# 后缀里塞错版本仍然要拦下来 —— 防止「带后缀就放过」。
+if sh "$CHECKER" v1.9.9-r1 "$SELFTEST/oxidns-1.6.0-r1_x86_64.apk" >/dev/null 2>&1; then
+	fail "checker accepted an arch-suffixed name with a wrong version"
+else
+	ok "checker rejects an arch-suffixed name with a wrong version"
+fi
+
 if sh "$CHECKER" v1.6.0 "$SELFTEST/oxidns-1.6.0-r1.apk" >/dev/null 2>&1; then
 	ok "checker normalises a tag without -r to r1"
 else

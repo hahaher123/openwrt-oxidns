@@ -2,8 +2,12 @@ name: upstream-watch
 
 # Every 24 hours: probe https://github.com/svenshi/oxidns for a new release.
 # If the upstream version is newer than PKG_VERSION in the repo Makefile, this
-# workflow bumps the package, commits the bump, rebuilds the x86/64 packages and
-# publishes them as a GitHub Release.
+# workflow bumps the package, commits the bump, rebuilds the packages for every
+# target in BUILD_TARGETS and publishes them as a single GitHub Release.
+#
+# BUILD_TARGETS is the single source of truth for the architecture list: the
+# build job feeds it to build.yml, and the release notes derive their wording
+# from it, so adding an architecture is a one-line change.
 #
 # Tag rule: v<PKG_VERSION>-r<PKG_RELEASE>, matching the package version exactly.
 # A local fix that only bumps PKG_RELEASE therefore gets its own tag instead of
@@ -16,6 +20,12 @@ name: upstream-watch
 #
 # The probe itself is cheap (two HTTP requests), so a "nothing changed" day
 # costs seconds. Only `changed == true` starts the expensive build.
+
+env:
+  # x86/64 : generic PC / PVE VM
+  # rockchip/armv8 : NanoPi R2S (friendlyarm_nanopi-r2s) and other RK3328/RK3399
+  BUILD_TARGETS: '["x86/64","rockchip/armv8"]'
+
 
 on:
   schedule:
@@ -110,7 +120,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
-    name: build x86/64
+    name: build packages
     needs: check
     if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
     permissions:
@@ -119,7 +129,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       sdk_version: ${{ inputs.sdk_version || '25.12.6' }}
-      targets: '["x86/64"]'
+      targets: ${{ env.BUILD_TARGETS }}
 
   publish:
     name: publish release
@@ -182,6 +192,11 @@ jobs:
           PREVIOUS: ${{ needs.check.outputs.previous }}
         run: |
           set -eu
+          # 架构列表来自 workflow 级 BUILD_TARGETS，正文/标题都从它派生，
+          # 避免"加了架构但 Release 里还写 x86_64"这种漂移。
+          targets_note="$(printf '%s' "$BUILD_TARGETS" | sed 's/[][]//g; s/","/ + /g; s/"//g')"
+          echo "targets: $targets_note"
+
           # 完整包版本 = PKG_VERSION-PKG_RELEASE。tag 必须带上 -r，否则同一上游版本下
           # 只升 PKG_RELEASE（修 bug / 改安装产物）会撞上已有 tag，变成静默覆盖旧 Release。
           tag="v$VERSION-r$RELEASE"
@@ -190,11 +205,11 @@ jobs:
           # README.md 里，不再往这里抄一份 —— 抄来的副本迟早和 README 漂移。
           if [ "$PREVIOUS" = "$VERSION" ]; then
             # force 重编：上游版本没动，变的只是包本身。
-            printf '上游仍为 `v%s`，包 `%s-r%s` 重新编译（OpenWrt 25.12 / x86_64）。\n\n' \
-              "$VERSION" "$VERSION" "$RELEASE" > notes.md
+            printf '上游仍为 `v%s`，包 `%s-r%s` 重新编译（OpenWrt 25.12，%s）。\n\n' \
+              "$VERSION" "$VERSION" "$RELEASE" "$targets_note" > notes.md
           else
-            printf '上游 OxiDNS `v%s` → `v%s`，包 `%s-r%s` 重新编译（OpenWrt 25.12 / x86_64）。\n\n' \
-              "$PREVIOUS" "$VERSION" "$VERSION" "$RELEASE" > notes.md
+            printf '上游 OxiDNS `v%s` → `v%s`，包 `%s-r%s` 重新编译（OpenWrt 25.12，%s）。\n\n' \
+              "$PREVIOUS" "$VERSION" "$VERSION" "$RELEASE" "$targets_note" > notes.md
             printf '上游变更：https://github.com/svenshi/oxidns/compare/v%s...v%s\n\n' \
               "$PREVIOUS" "$VERSION" >> notes.md
           fi
@@ -221,7 +236,7 @@ jobs:
             gh release upload "$tag" dist/*.apk --clobber
           else
             gh release create "$tag" dist/*.apk \
-              --title "OxiDNS $VERSION-r$RELEASE (OpenWrt x86/64)" \
+              --title "OxiDNS $VERSION-r$RELEASE (OpenWrt $targets_note)" \
               --notes-file notes.md
           fi
 
