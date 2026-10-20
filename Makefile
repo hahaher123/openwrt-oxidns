@@ -34,7 +34,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
 PKG_VERSION:=1.6.1
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
@@ -110,7 +110,13 @@ define Package/oxidns
   SUBMENU:=IP Addresses and Names
   TITLE:=OxiDNS - programmable DNS engine (Rust)
   URL:=https://github.com/svenshi/oxidns
-  DEPENDS:=$(OXIDNS_ARCH_DEPENDS) +libgcc
+  # v2ray-geoip / v2ray-geosite (both from feeds/packages net/v2ray-geodata)
+  # own /usr/share/v2ray/{geoip.dat,geosite.dat}. The default config and every
+  # GEOSITE/GEOIP(dat) provider point there, so they are hard runtime
+  # requirements rather than optional extras: without them the daemon has no
+  # geo data at all. oxidns is the component that refreshes those files
+  # (subscription_download), so it is the natural place to declare them.
+  DEPENDS:=$(OXIDNS_ARCH_DEPENDS) +libgcc +v2ray-geoip +v2ray-geosite
 endef
 
 define Package/oxidns/description

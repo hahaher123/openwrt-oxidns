@@ -25,8 +25,8 @@ WebUI 是独立构建的 Next.js 静态产物，上游只随 Release 归档分�
 
 | 文件 | 提供者 | 更新者 |
 | --- | --- | --- |
-| `/usr/share/v2ray/geoip.dat` | 镜像里的 `v2ray-geoip` 包 | **本包**（oxidns 的 `download` 插件） |
-| `/usr/share/v2ray/geosite.dat` | 镜像里的 `v2ray-geosite` 包 | 同上 |
+| `/usr/share/v2ray/geoip.dat` | `v2ray-geoip` 包（本包的硬依赖） | **本包**（oxidns 的 `download` 插件） |
+| `/usr/share/v2ray/geosite.dat` | `v2ray-geosite` 包（本包的硬依赖） | 同上 |
 
 两个包只保证「文件有 apk 归属」；实际内容在镜像构建时被替换成
 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 的最新发布。
