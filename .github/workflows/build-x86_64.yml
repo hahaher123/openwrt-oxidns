@@ -1,0 +1,35 @@
+name: build-x86_64
+
+# 单架构构建入口：只编 x86/64。
+#
+# 为什么单独一个工作流：两个架构的构建互相独立 —— 各自 runner、各自缓存 key、
+# 各自 355 分钟超时、各自 run 历史。armv8 冷缓存可能跑几小时，不会挡住 x86 的重跑。
+#
+# 底层仍然复用 build.yml（通用、可传多个 target），这里只是把 targets 钉死。
+# 自动发版走 upstream-watch.yml，它直接调用 build.yml 并传 BUILD_TARGETS。
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: OpenWrt release to build against
+        required: true
+        default: '25.12.6'
+  workflow_call:
+    inputs:
+      sdk_version:
+        description: OpenWrt release to build against
+        type: string
+        required: false
+        default: '25.12.6'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      sdk_version: ${{ inputs.sdk_version || '25.12.6' }}
+      targets: '["x86/64"]'

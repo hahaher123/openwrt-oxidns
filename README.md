@@ -48,7 +48,16 @@ sh scripts/build-sdk.sh -t x86/64 -v 25.12.6 -o ./out
 
 ## 自动化
 
-`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH` / `OXIDNS_WEBUI_HASH`、用 SDK 编译 **`BUILD_TARGETS` 里的全部目标**并发布同一个 Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`，附件 .apk）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
+**手动编译**：Actions 里有两个单架构工作流，各自独立触发、独立重跑、独立看耗时：
+
+| 工作流 | 构建目标 | 产物 |
+|---|---|---|
+| `build-x86_64` | `x86/64` | `oxidns-<ver>_x86_64.apk` |
+| `build-aarch64` | `rockchip/armv8` | `oxidns-<ver>_aarch64_generic.apk` |
+
+两者底层都复用 `build.yml`（它也支持手动选多个 target，用于一次性全量编）。拆开是为了让 armv8 的冷缓存长构建（要现场编 Rust 工具链）不挡住 x86 的重跑。
+
+**自动发版**：`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH` / `OXIDNS_WEBUI_HASH`，并行跑上面两个架构的构建，把两边产物汇总成**一个** Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
 
 当前目标：
 
@@ -57,7 +66,7 @@ sh scripts/build-sdk.sh -t x86/64 -v 25.12.6 -o ./out
 | `x86/64` | `x86_64` | `_x86_64` | PC / PVE 虚拟机 |
 | `rockchip/armv8` | `aarch64_generic` | `_aarch64_generic` | NanoPi R2S（`friendlyarm_nanopi-r2s`）等 RK3328/RK3399 |
 
-多目标时 apk 文件名带架构后缀（`oxidns-1.6.1-r2_aarch64_generic.apk`），否则两个 target 的同名文件在 Release 里会撞。加架构只需改 `upstream-watch.yml` 的 `BUILD_TARGETS` 一处 —— 构建矩阵与 Release 正文/标题都从它派生。
+多架构时 apk 文件名带架构后缀（`oxidns-1.6.1-r2_aarch64_generic.apk`），否则两个 target 的同名文件在 Release 里会撞。新增架构：新建 `build-<arch>.yml`、在 `upstream-watch.yml` 加一个对应 job、把架构加进 `BUILD_TARGETS`（后者只用于 Release 文案）。
 
 ## 已知限制
 

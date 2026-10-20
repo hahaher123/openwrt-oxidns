@@ -5,9 +5,9 @@ name: upstream-watch
 # workflow bumps the package, commits the bump, rebuilds the packages for every
 # target in BUILD_TARGETS and publishes them as a single GitHub Release.
 #
-# BUILD_TARGETS is the single source of truth for the architecture list: the
-# build job feeds it to build.yml, and the release notes derive their wording
-# from it, so adding an architecture is a one-line change.
+# BUILD_TARGETS 只用于生成 Release 正文/标题里的架构说明。真正的构建按架构拆在
+# build-x86_64.yml / build-aarch64.yml 里（一个架构一个工作流），所以新增架构要改三处：
+# 新建 build-<arch>.yml、在本文件加一个 build-<arch> job、往 BUILD_TARGETS 里加一项。
 #
 # Tag rule: v<PKG_VERSION>-r<PKG_RELEASE>, matching the package version exactly.
 # A local fix that only bumps PKG_RELEASE therefore gets its own tag instead of
@@ -119,21 +119,33 @@ jobs:
             echo "| changed | ${{ steps.bump.outputs.changed }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  build:
-    name: build packages
+  # 每个架构一个 job，各自调用自己的单架构工作流：缓存 key、超时、日志都独立，
+  # armv8 冷缓存慢或失败不会掩盖 x86 的结果。publish 汇总两边的产物发一个 Release。
+  build-x86_64:
+    name: build x86_64
     needs: check
     if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
     permissions:
       contents: read
       actions: read
-    uses: ./.github/workflows/build.yml
+    uses: ./.github/workflows/build-x86_64.yml
     with:
       sdk_version: ${{ inputs.sdk_version || '25.12.6' }}
-      targets: ${{ env.BUILD_TARGETS }}
+
+  build-aarch64:
+    name: build aarch64
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/build-aarch64.yml
+    with:
+      sdk_version: ${{ inputs.sdk_version || '25.12.6' }}
 
   publish:
     name: publish release
-    needs: [ check, build ]
+    needs: [ check, build-x86_64, build-aarch64 ]
     if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
