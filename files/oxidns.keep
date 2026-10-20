@@ -1,11 +1,17 @@
 # Paths kept across sysupgrade for oxidns.
 #
-# /etc/oxidns/ holds the default config plus everything the daemon needs at
-# runtime that the package itself does NOT install:
-#   geoip.dat / geosite.dat   GeoIP/GeoSite databases fetched by the user
-#                             (tens of MB; missing => oxidns refuses to start)
-#   rule/*.txt                routing rules maintained on the device
+# /etc/oxidns/ holds the default config plus the routing rules maintained on
+# the device:
+#   rule/*.txt                routing rules, edited by hand or via the WebUI
 #
 # None of it is a conffile, and no other package claims it in keep.d, so
 # without this file every full sysupgrade silently wipes the daemon's inputs.
 /etc/oxidns/
+
+# /usr/share/v2ray/ is the shared geo database used by BOTH oxidns and mihomo
+# (packages v2ray-geoip / v2ray-geosite own the files, oxidns refreshes them).
+# Together they are tens of MB and only refresh every 144h, so without this
+# line a sysupgrade rolls them back to whatever the image was built with and
+# the daemon runs on stale data until the next timer fires.
+# Kept on purpose: this is runtime data, not package payload.
+/usr/share/v2ray/

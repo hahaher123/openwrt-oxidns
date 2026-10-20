@@ -75,16 +75,20 @@ plugins:
       timeout: 60s
       startup_if_missing: true
       downloads:
-        - url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
+        - url: "https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
           dir: "/usr/share/v2ray"
           filename: "geosite.dat"
-        - url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+        - url: "https://fastly.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
           dir: "/usr/share/v2ray"
           filename: "geoip.dat"
 ```
 
-分工要记清：`/usr/share/v2ray/` 属于镜像（sysupgrade 后会被刷新成新的出厂数据），
-自维护规则放 `/etc/oxidns/rule/*.txt`（keep.d 保留）。
+下载源用 `fastly.jsdelivr.net` 而不是 `cdn.jsdelivr.net`：后者在国内节点偶发返回 HTML 错误页
+（HTTP 200 + 网页正文），而 `download` 插件不校验内容，一旦写坏就是坏 geo 数据；
+fastly 节点实测稳定。两条都下载完才 `reload_rule_providers`，中途失败不会半更新。
+
+分工要记清：`/usr/share/v2ray/` 由镜像里的 `v2ray-geoip` / `v2ray-geosite` 提供、**oxidns 负责刷新**，
+`/etc/oxidns/rule/*.txt` 是自维护规则；两者都在 `keep.d` 里，整盘 sysupgrade 都保留。
 
 ## 从源码构建
 
