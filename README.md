@@ -59,6 +59,8 @@ sh scripts/build-sdk.sh -t x86/64 -v 25.12.6 -o ./out
 
 **自动发版**：`upstream-watch.yml` 每 24 小时探测上游 release：有新版本就改写 `PKG_VERSION` / `PKG_HASH` / `OXIDNS_WEBUI_HASH`，并行跑上面两个架构的构建，把两边产物汇总成**一个** Release（tag `v<PKG_VERSION>-r<PKG_RELEASE>`）。手动补跑在 Actions 的 upstream-watch 里（勾 `force` 可强制重编）。手工跟进版本：`sh scripts/sync-upstream.sh`。
 
+探测同时负责**修哈希漂移**：GitHub 会重新生成某个 tag 的源码归档（上游也可能改 tag 指向），同一个版本号会换回不同的字节。这时 `PKG_HASH` 必须跟着变 —— 否则仓库里的 hash 指向旧归档，下一次编译会在下载源码处哈希校验失败。工作流每次探测都会重算 hash，**版本号没变但 hash 变了就单独提交一次**（`fix: 更新 PKG_HASH（上游归档字节变化）`），且不动 `PKG_RELEASE`。这种情况不触发编译（tag 不变），要按新归档重新出包就手动 dispatch 勾 `force`。
+
 当前目标：
 
 | target | 包架构 | 文件名后缀 | 适用 |

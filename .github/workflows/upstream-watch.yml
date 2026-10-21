@@ -5,6 +5,12 @@ name: upstream-watch
 # workflow bumps the package, commits the bump, rebuilds the packages for every
 # target in BUILD_TARGETS and publishes them as a single GitHub Release.
 #
+# It also repairs hash drift: GitHub regenerates the archives it serves for a
+# tag (and upstream may re-point a tag), so the same version can come back with
+# different bytes. The probe recomputes PKG_HASH every run and commits it when it
+# moved, even though the version did not — otherwise the repo keeps a hash that
+# no longer matches the tarball and every build fails at download time.
+#
 # BUILD_TARGETS 只用于生成 Release 正文/标题里的架构说明。真正的构建按架构拆在
 # build-x86_64.yml / build-aarch64.yml 里（一个架构一个工作流），所以新增架构要改三处：
 # 新建 build-<arch>.yml、在本文件加一个 build-<arch> job、往 BUILD_TARGETS 里加一项。
@@ -76,22 +82,37 @@ jobs:
 
           previous="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
           previous_release="$(sed -n 's/^PKG_RELEASE:=//p' "$MAKE" | head -n1)"
+          previous_hash="$(sed -n 's/^PKG_HASH:=//p' "$MAKE" | head -n1)"
           sh scripts/sync-upstream.sh
           version="$(sed -n 's/^PKG_VERSION:=//p' "$MAKE" | head -n1)"
           # sync-upstream.sh 在换 PKG_VERSION 时会把 PKG_RELEASE 重置为 1；
           # 若是本地修 bug 只升了 PKG_RELEASE，这里读到的就是新修订号。
           release="$(sed -n 's/^PKG_RELEASE:=//p' "$MAKE" | head -n1)"
+          hash="$(sed -n 's/^PKG_HASH:=//p' "$MAKE" | head -n1)"
 
           echo "upstream=$version  local=$previous"
           echo "version=$version"   >> "$GITHUB_OUTPUT"
           echo "release=$release"   >> "$GITHUB_OUTPUT"
           echo "previous=$previous" >> "$GITHUB_OUTPUT"
           echo "previous_release=$previous_release" >> "$GITHUB_OUTPUT"
+          echo "previous_hash=$previous_hash" >> "$GITHUB_OUTPUT"
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
           if [ "$version" != "$previous" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "changed=true"     >> "$GITHUB_OUTPUT"
+            echo "hash_drift=false" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet -- "$MAKE"; then
+            # 版本号没变，但 sync-upstream.sh 改动了 Makefile ⇒ 只可能是哈希漂移：
+            # GitHub 重新生成了 tag 归档，或上游把 tag 指到了别的提交。
+            #
+            # 旧逻辑在这里把改动直接丢掉（只按版本号判 changed），于是仓库里的
+            # PKG_HASH 停在上一份归档的值，之后任何一次编译都会在下载源码时
+            # 哈希校验失败 —— 报错离原因很远，很难查。
+            echo "changed=false"    >> "$GITHUB_OUTPUT"
+            echo "hash_drift=true"  >> "$GITHUB_OUTPUT"
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "changed=false"    >> "$GITHUB_OUTPUT"
+            echo "hash_drift=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Commit the version bump
@@ -106,6 +127,25 @@ jobs:
           git commit -m "oxidns: update to ${VERSION}"
           git push origin "HEAD:${{ github.ref_name }}"
 
+      # 版本没变、只有归档字节变了（GitHub 重新生成 tag 归档 / 上游改 tag 指向）。
+      # 必须把新的 PKG_HASH 提交掉，否则仓库里的 hash 会一直指向旧归档，
+      # 下一次 `make` 在下载源码时就哈希校验失败。
+      - name: Commit a hash-only fix
+        if: steps.bump.outputs.hash_drift == 'true'
+        run: |
+          set -eu
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Makefile
+          git commit -m "fix: 更新 PKG_HASH（上游归档字节变化）"
+          git push origin "HEAD:${{ github.ref_name }}"
+          {
+            echo ''
+            echo '> 上游归档字节变了但 `PKG_VERSION` 没变，已提交新的 `PKG_HASH`。'
+            echo '> 未触发编译：tag 不变，已发布的 APK 仍对应上一份归档。'
+            echo '> 若要按新归档重新出包，手动 dispatch 本工作流并勾选 `force`。'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Summary
         run: |
           {
@@ -117,6 +157,16 @@ jobs:
             echo "| local before | ${{ steps.bump.outputs.previous }}-r${{ steps.bump.outputs.previous_release }} |"
             echo "| package version | ${{ steps.bump.outputs.version }}-r${{ steps.bump.outputs.release }} |"
             echo "| changed | ${{ steps.bump.outputs.changed }} |"
+            echo "| hash drift | ${{ steps.bump.outputs.hash_drift }} |"
+            if [ '${{ steps.bump.outputs.hash_drift }}' = 'true' ]; then
+              echo ''
+              echo '`PKG_HASH` 的旧值 → 新值：'
+              echo ''
+              echo '```'
+              echo "old ${{ steps.bump.outputs.previous_hash }}"
+              echo "new ${{ steps.bump.outputs.hash }}"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   # 每个架构一个 job，各自调用自己的单架构工作流：缓存 key、超时、日志都独立，

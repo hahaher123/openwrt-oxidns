@@ -8,6 +8,11 @@
 # archive rather than from the sources, so its hash is recomputed here too -
 # miss that and the build fails on a checksum mismatch.
 #
+# The rewrite also happens when only a hash moved: GitHub regenerates the
+# archives it serves for a tag, so the same version can come back with different
+# bytes. PKG_RELEASE is reset to 1 only when PKG_VERSION actually changes, so a
+# hash-only repair keeps the current release number.
+#
 # Nothing is committed: review the diff and commit it yourself.
 #
 # Usage:
@@ -124,10 +129,19 @@ if [ "$old_version" = "$version" ] \
 fi
 
 sed -e "s/^PKG_VERSION:=.*/PKG_VERSION:=$version/" \
-	-e "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" \
 	-e "s/^PKG_HASH:=.*/PKG_HASH:=$hash/" \
 	-e "s/^OXIDNS_WEBUI_HASH:=.*/OXIDNS_WEBUI_HASH:=$webui_hash/" \
 	"$MAKE" > "$WORK/Makefile.new"
+
+# Reset PKG_RELEASE only when the version actually moved. A hash-only rewrite
+# (GitHub regenerated the tag archive) must not touch the release number,
+# otherwise a drift repair silently rolls v1.6.1-r4 back to v1.6.1-r1.
+if [ "$old_version" != "$version" ]; then
+	sed -e "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" \
+		"$WORK/Makefile.new" > "$WORK/Makefile.bumped"
+	mv "$WORK/Makefile.bumped" "$WORK/Makefile.new"
+fi
+
 mv "$WORK/Makefile.new" "$MAKE"
 chmod 644 "$MAKE"
 
@@ -135,4 +149,9 @@ printf '\nUpdated %s\n' "$MAKE"
 printf '  PKG_VERSION       %s -> %s\n' "$old_version" "$version"
 printf '  PKG_HASH          %s -> %s\n' "$old_hash" "$hash"
 printf '  OXIDNS_WEBUI_HASH %s -> %s\n' "$old_webui_hash" "$webui_hash"
-printf '\nNext: sh scripts/validate.sh && git commit -am "oxidns: update to %s"\n' "$version"
+
+if [ "$old_version" = "$version" ]; then
+	printf '\nNext: sh scripts/validate.sh && git commit -am "fix: 更新 PKG_HASH（上游归档字节变化）"\n'
+else
+	printf '\nNext: sh scripts/validate.sh && git commit -am "oxidns: update to %s"\n' "$version"
+fi

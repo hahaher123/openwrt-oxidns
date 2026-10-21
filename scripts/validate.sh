@@ -396,6 +396,36 @@ else
 	fail ".gitattributes is missing (git on Windows will inject CRLF)"
 fi
 
+# --- 6b. upstream bump logic ---------------------------------------------------
+#
+# 这两个不变量各自对应一次真实的踩坑，静态检查是为了别再把它们改回去：
+#
+#   1. sync-upstream.sh 只在 PKG_VERSION 真的变了时才把 PKG_RELEASE 复位为 1。
+#      无条件复位会让"只修哈希"的漂移修复把 v1.6.1-r4 静默回退成 v1.6.1-r1。
+#   2. upstream-watch 会在版本号没变、只有归档字节变了时提交新的 PKG_HASH。
+#      不做这件事，仓库里的 hash 会一直指向旧归档，下一次编译在下载源码时
+#      哈希校验失败 —— 报错点离原因很远。
+
+section "upstream bump logic"
+
+if grep -q 'if \[ "\$old_version" != "\$version" \]' scripts/sync-upstream.sh; then
+	ok "sync-upstream guards the PKG_RELEASE reset behind a version change"
+else
+	fail "sync-upstream.sh resets PKG_RELEASE unconditionally (a hash-only fix would roll the release number back)"
+fi
+
+if grep -q 'hash_drift=true' .github/workflows/upstream-watch.yml; then
+	ok "upstream-watch detects hash drift"
+else
+	fail "upstream-watch.yml does not detect a hash-only drift"
+fi
+
+if grep -q "steps.bump.outputs.hash_drift == 'true'" .github/workflows/upstream-watch.yml; then
+	ok "upstream-watch commits a hash-only fix"
+else
+	fail "upstream-watch.yml never commits a drifted PKG_HASH"
+fi
+
 # --- 7. upstream consistency --------------------------------------------------
 
 section "upstream consistency"
