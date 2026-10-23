@@ -9,7 +9,7 @@
 /etc/oxidns/
 
 # /usr/share/v2ray/ is the shared geo database used by BOTH oxidns and mihomo
-# (packages v2ray-geoip / v2ray-geosite own the files, oxidns refreshes them).
+# (the whole-image overlay ships the initial copies; oxidns refreshes them).
 # Together they are tens of MB and only refresh every 144h, so without this
 # line a sysupgrade rolls them back to whatever the image was built with and
 # the daemon runs on stale data until the next timer fires.

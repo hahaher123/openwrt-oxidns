@@ -34,7 +34,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
 PKG_VERSION:=1.6.1
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
@@ -110,13 +110,13 @@ define Package/oxidns
   SUBMENU:=IP Addresses and Names
   TITLE:=OxiDNS - programmable DNS engine (Rust)
   URL:=https://github.com/svenshi/oxidns
-  # v2ray-geoip / v2ray-geosite (both from feeds/packages net/v2ray-geodata)
-  # own /usr/share/v2ray/{geoip.dat,geosite.dat}. The default config and every
-  # GEOSITE/GEOIP(dat) provider point there, so they are hard runtime
-  # requirements rather than optional extras: without them the daemon has no
-  # geo data at all. oxidns is the component that refreshes those files
-  # (subscription_download), so it is the natural place to declare them.
-  DEPENDS:=$(OXIDNS_ARCH_DEPENDS) +libgcc +v2ray-geoip +v2ray-geosite
+  # geo 数据 /usr/share/v2ray/{geoip.dat,geosite.dat} 不再由 v2ray-geoip /
+  # v2ray-geosite 两个包提供：整机镜像里它们是 FILES 覆盖层的一部分（构建时
+  # 从 Loyalsoldier/v2ray-rules-dat 下载，见 openwrt-imagebuilder 仓库），
+  # 设备上由 oxidns 自己的 download 插件刷新（本包的 keep.d 也保留了该目录）。
+  # 不再声明这两个依赖 —— 裸装本包（不经镜像）时 geo 数据为空，属已知取舍，
+  # 由 download 插件在首次启动时补齐（startup_if_missing）。
+  DEPENDS:=$(OXIDNS_ARCH_DEPENDS) +libgcc
 endef
 
 define Package/oxidns/description
