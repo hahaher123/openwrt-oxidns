@@ -191,20 +191,38 @@ jobs:
         target: ['x86-64', 'rockchip-armv8']
     env:
       SDK_VERSION: ${{ inputs.sdk_version || '25.12.6' }}
+      # ⚠ 缓存条目的版本哈希由 key + 路径列表 + 压缩工具共同决定（路径列表变了
+      # 版本就变，key 相同也会静默 miss），所以这里的路径必须与 build.yml 的
+      # cache path 逐字节一致，包括 OXIDNS_WORKDIR 的取值。
+      OXIDNS_WORKDIR: /mnt/openwrt-oxidns
     steps:
-      # 恢复到 RUNNER_TEMP 即可：缓存按 key 寻址，与 build 的落盘路径无关，
-      # restore 动作本身就刷新 last_accessed_at。
+      # build.yml 的 "Prepare work directory" 同款：缓存路径在 /mnt 下，先建目录。
+      - name: Prepare work directory
+        run: |
+          set -eu
+          if ! mkdir -p "$OXIDNS_WORKDIR" 2>/dev/null; then
+            sudo mkdir -p "$OXIDNS_WORKDIR"
+            sudo chown "$(id -u):$(id -g)" "$OXIDNS_WORKDIR"
+          fi
+
+      # restore 动作本身即刷新 7 天驱逐时钟。key 故意永不匹配，靠 restore-keys
+      # 前缀命中现有缓存；restore-only 不回存，不新增条目。
       - name: Touch host toolchain cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/keepalive-warm/host
+          path: |
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/build_dir/target-*/host
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/host
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/hostpkg
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/staging_dir/toolchain-*
+            ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-*/dl
           key: keepalive-host-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: openwrt-host-${{ env.SDK_VERSION }}-${{ matrix.target }}-v2
 
       - name: Touch SDK archive cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/keepalive-warm/sdk
+          path: ${{ env.OXIDNS_WORKDIR }}/openwrt-sdk-${{ env.SDK_VERSION }}-${{ matrix.target }}*.tar.zst
           key: keepalive-sdk-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: sdk-archive-${{ env.SDK_VERSION }}-${{ matrix.target }}
 
