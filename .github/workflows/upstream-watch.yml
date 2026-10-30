@@ -169,6 +169,53 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # 缓存保活：上游没升级（也没 force）时不构建，build job 不会恢复缓存 —— 而
+  # GitHub 的 Actions 缓存按「最后访问时间」7 天不访问即驱逐，放任不管的话
+  # 冷跑一次 rust host toolchain 要 3-6 小时。这里在不构建的日子里用
+  # cache/restore（只恢复、不回存）把两份缓存各摸一次，刷新驱逐时钟；
+  # 真正的升级构建走 build job，天然会恢复缓存，不需要本 job。
+  # 与版本检查合并在同一个 workflow 里：升级 → 构建发版；没升级 → 只保活，
+  # 不发 Release。
+  keepalive:
+    name: keep build caches warm (${{ matrix.target }})
+    needs: check
+    if: needs.check.outputs.changed != 'true' && github.event.inputs.force != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 与 build.yml 里 TARGET_ID 的取值保持一致（x86/64 -> x86-64 等）。
+        target: ['x86-64', 'rockchip-armv8']
+    env:
+      SDK_VERSION: ${{ inputs.sdk_version || '25.12.6' }}
+    steps:
+      # 恢复到 RUNNER_TEMP 即可：缓存按 key 寻址，与 build 的落盘路径无关，
+      # restore 动作本身就刷新 last_accessed_at。
+      - name: Touch host toolchain cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/keepalive-warm/host
+          key: keepalive-host-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: openwrt-host-${{ env.SDK_VERSION }}-${{ matrix.target }}-v2
+
+      - name: Touch SDK archive cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/keepalive-warm/sdk
+          key: keepalive-sdk-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: sdk-archive-${{ env.SDK_VERSION }}-${{ matrix.target }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### Cache keepalive (\`${{ matrix.target }}\`)"
+            echo ''
+            echo '上游无新版本，未构建；已恢复构建缓存刷新 7 天驱逐时钟（不发 Release）。'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # 每个架构一个 job，各自调用自己的单架构工作流：缓存 key、超时、日志都独立，
   # armv8 冷缓存慢或失败不会掩盖 x86 的结果。publish 汇总两边的产物发一个 Release。
   build-x86_64:
