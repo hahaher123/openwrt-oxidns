@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Build the OxiDNS packages against an official OpenWrt SDK.
