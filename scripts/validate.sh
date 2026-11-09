@@ -25,6 +25,13 @@ UPSTREAM_REPO="svenshi/oxidns"
 OFFLINE="${OXIDNS_OFFLINE:-0}"
 PROXY="${OXIDNS_PROXY:-}"
 
+# Same retry policy as scripts/sync-upstream.sh: GitHub's CDN intermittently
+# answers 502/503/504 for release assets (a 504 there failed the probe on
+# 2026-11-08), and a single-shot curl -f turns that into a red build.
+FETCH_RETRIES=5
+FETCH_RETRY_DELAY=5
+FETCH_CONNECT_TIMEOUT=15
+
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-validate.XXXXXX")"
 # mktemp may hand back a Windows-style path (C:\...) when TMPDIR is a Windows
 # path; GNU tar would read that as a remote "host:file" spec. cd+pwd normalises
@@ -87,15 +94,28 @@ fetch() {
 		cd "$dir" || exit 1
 		if command -v curl >/dev/null 2>&1; then
 			if [ -n "$PROXY" ]; then
-				curl -fsSL -x "$PROXY" -o "./$base" "$1"
+				curl -fsSL -x "$PROXY" \
+					--retry "$FETCH_RETRIES" --retry-delay "$FETCH_RETRY_DELAY" \
+					--connect-timeout "$FETCH_CONNECT_TIMEOUT" \
+					--speed-limit 1024 --speed-time 30 \
+					-o "./$base" "$1"
 			else
-				curl -fsSL -o "./$base" "$1"
+				curl -fsSL \
+					--retry "$FETCH_RETRIES" --retry-delay "$FETCH_RETRY_DELAY" \
+					--connect-timeout "$FETCH_CONNECT_TIMEOUT" \
+					--speed-limit 1024 --speed-time 30 \
+					-o "./$base" "$1"
 			fi
 		elif command -v wget >/dev/null 2>&1; then
 			if [ -n "$PROXY" ]; then
-				http_proxy="$PROXY" https_proxy="$PROXY" wget -q -O "./$base" "$1"
+				http_proxy="$PROXY" https_proxy="$PROXY" \
+					wget -q -O "./$base" \
+					--tries="$FETCH_RETRIES" --waitretry="$FETCH_RETRY_DELAY" \
+					--timeout=30 "$1"
 			else
-				wget -q -O "./$base" "$1"
+				wget -q -O "./$base" \
+					--tries="$FETCH_RETRIES" --waitretry="$FETCH_RETRY_DELAY" \
+					--timeout=30 "$1"
 			fi
 		else
 			echo "no curl/wget available" >&2
@@ -424,6 +444,41 @@ if grep -q "steps.bump.outputs.hash_drift == 'true'" .github/workflows/upstream-
 	ok "upstream-watch commits a hash-only fix"
 else
 	fail "upstream-watch.yml never commits a drifted PKG_HASH"
+fi
+
+# 3. 下载带重试。GitHub 的 release 资产由 CDN 回源，偶发 502/503/504：
+#    2026-11-08 的 upstream-watch 就红在这里 —— tag 归档已下完，紧接着的
+#    release 资产（WebUI）被网关超时挡回 504，单发 `curl -f` 直接 exit 22。
+#    重试参数被删掉不会报错，只会在下一次上游抖动时变成红构建，所以静态盯住。
+#
+#    只在 fetch() 函数体里找 —— 对 validate.sh 自身 grep 全文会命中这条断言
+#    自己的模式串，那样永远是绿的。
+sync_fetch="$(awk '/^fetch\(\) \{/,/^\}/' scripts/sync-upstream.sh)"
+val_fetch="$(awk '/^fetch\(\) \{/,/^\}/' scripts/validate.sh)"
+
+retry_branches="$(printf '%s\n' "$sync_fetch" | grep -c -- '--retry "\$FETCH_RETRIES"' || true)"
+if [ "$retry_branches" = "2" ]; then
+	ok "sync-upstream retries downloads (both curl branches)"
+else
+	fail "sync-upstream.sh has $retry_branches/2 curl branches with --retry (a CDN 504 would fail the probe)"
+fi
+
+if printf '%s\n' "$sync_fetch" | grep -q -- '--tries="\$FETCH_RETRIES"'; then
+	ok "sync-upstream retries downloads on the wget fallback"
+else
+	fail "sync-upstream.sh wget fallback does not retry"
+fi
+
+if printf '%s\n' "$sync_fetch" | grep -q 'download produced an empty file'; then
+	ok "sync-upstream rejects an empty download"
+else
+	fail "sync-upstream.sh accepts an empty download (an empty body would be hashed into PKG_HASH)"
+fi
+
+if printf '%s\n' "$val_fetch" | grep -q -- '--retry "\$FETCH_RETRIES"'; then
+	ok "validate.sh retries its own downloads"
+else
+	fail "validate.sh downloads without --retry (a CDN 504 would fail validation)"
 fi
 
 # --- 7. upstream consistency --------------------------------------------------

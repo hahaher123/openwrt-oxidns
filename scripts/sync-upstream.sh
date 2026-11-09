@@ -30,6 +30,16 @@ PROXY="${OXIDNS_PROXY:-}"
 # Must match OXIDNS_WEBUI_ARCHIVE in the Makefile.
 WEBUI_ARCHIVE="oxidns-x86_64-unknown-linux-musl.tar.gz"
 
+# Downloads are retried because GitHub's release assets are served through a CDN
+# that intermittently answers 502/503/504 (observed 2026-11-08: the tag archive
+# came down fine, the release asset right after it answered 504, and the whole
+# probe failed on a single transient error). curl's --retry already covers
+# 408/429/500/502/503/504 and transient connect failures; --speed-limit/-time
+# turns a stalled transfer into a timeout (exit 28) so it gets retried too.
+FETCH_RETRIES=5
+FETCH_RETRY_DELAY=5
+FETCH_CONNECT_TIMEOUT=15
+
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/oxidns-sync.XXXXXX")"
 # mktemp may hand back a Windows-style path (C:\...) when TMPDIR is a Windows
 # path; GNU tar would read that as a remote "host:file" spec. cd+pwd normalises
@@ -44,24 +54,68 @@ fetch() {
 	# to "./<name>". That keeps the path relative, which matters when the only
 	# curl around is the Windows one (it understands C:\... but not MSYS
 	# /c/... paths) while tar wants the opposite.
+	#
+	# Transient upstream/CDN errors are retried; a permanent failure (404, bad
+	# host, exhausted retries) still exits non-zero so the probe goes red.
 	dir="$(dirname "$2")"
 	base="$(basename "$2")"
+	rc=0
 	(
 		cd "$dir" || exit 1
 		if command -v curl >/dev/null 2>&1; then
 			if [ -n "$PROXY" ]; then
-				curl -fsSL -x "$PROXY" -o "./$base" "$1"
+				curl -fsSL -x "$PROXY" \
+					--retry "$FETCH_RETRIES" --retry-delay "$FETCH_RETRY_DELAY" \
+					--connect-timeout "$FETCH_CONNECT_TIMEOUT" \
+					--speed-limit 1024 --speed-time 30 \
+					-o "./$base" "$1"
 			else
-				curl -fsSL -o "./$base" "$1"
+				curl -fsSL \
+					--retry "$FETCH_RETRIES" --retry-delay "$FETCH_RETRY_DELAY" \
+					--connect-timeout "$FETCH_CONNECT_TIMEOUT" \
+					--speed-limit 1024 --speed-time 30 \
+					-o "./$base" "$1"
 			fi
 		else
 			if [ -n "$PROXY" ]; then
-				http_proxy="$PROXY" https_proxy="$PROXY" wget -q -O "./$base" "$1"
+				http_proxy="$PROXY" https_proxy="$PROXY" \
+					wget -q -O "./$base" \
+					--tries="$FETCH_RETRIES" --waitretry="$FETCH_RETRY_DELAY" \
+					--timeout=30 "$1"
 			else
-				wget -q -O "./$base" "$1"
+				wget -q -O "./$base" \
+					--tries="$FETCH_RETRIES" --waitretry="$FETCH_RETRY_DELAY" \
+					--timeout=30 "$1"
 			fi
 		fi
-	)
+	) || rc=$?
+
+	if [ "$rc" -ne 0 ]; then
+		printf 'download failed (exit %s): %s\n' "$rc" "$1" >&2
+		printf '  already retried %s time(s) with a %ss delay.\n' \
+			"$FETCH_RETRIES" "$FETCH_RETRY_DELAY" >&2
+		case "$rc" in
+		22)
+			# curl -f maps every HTTP error to 22, so 4xx and 5xx look alike here.
+			printf '  HTTP error: 5xx (e.g. 504) is an upstream/CDN hiccup - re-running\n' >&2
+			printf '  the workflow usually succeeds; 4xx means the tag or asset is wrong.\n' >&2
+			;;
+		28)
+			printf '  timed out or stalled - the link to the upstream host is unstable.\n' >&2
+			;;
+		6 | 7)
+			printf '  DNS/connect failure - check the network or the URL host.\n' >&2
+			;;
+		esac
+		return 1
+	fi
+
+	# A 200 with an empty body would otherwise be hashed as the digest of "" and
+	# silently poison PKG_HASH.
+	if [ ! -s "$2" ]; then
+		printf 'download produced an empty file: %s\n' "$1" >&2
+		return 1
+	fi
 }
 
 sha256_of() {
