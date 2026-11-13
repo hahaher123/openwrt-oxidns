@@ -300,6 +300,44 @@ else
 	done
 fi
 
+# --- 3b. package hooks --------------------------------------------------------
+#
+# 升级后必须重启服务：安装只替换 /usr/bin/oxidns，运行中的进程继续持有已删除的
+# 旧 inode，表现是「装了新版本但行为没变」。2026-11-12 从 1.6.1 升 1.7.1 时实测：
+# /proc/<pid>/exe 指向 /usr/bin/oxidns (deleted)，旧进程又跑了近一天。
+#
+# 两条守卫同样不能丢：
+#   1. IPKG_INSTROOT 非空 = 在镜像里安装（buildroot / imagebuilder），不能动宿主 init；
+#   2. 只在服务正在运行时重启，否则会把用户故意停掉的服务拉起来。
+
+section "package hooks"
+
+if grep -q '^define Package/oxidns/postinst' "$MAKE"; then
+	ok "postinst is defined"
+else
+	fail "no Package/oxidns/postinst (an upgrade would leave the old binary running)"
+fi
+
+postinst="$(sed -n '/^define Package\/oxidns\/postinst/,/^endef/p' "$MAKE")"
+
+if printf '%s\n' "$postinst" | grep -q 'IPKG_INSTROOT'; then
+	ok "postinst skips host-side work when installing into an image"
+else
+	fail "postinst does not check IPKG_INSTROOT (image builds would touch the host init)"
+fi
+
+if printf '%s\n' "$postinst" | grep -q 'pidof oxidns'; then
+	ok "postinst only restarts a running service"
+else
+	fail "postinst restarts unconditionally (a deliberately stopped service would be started)"
+fi
+
+if printf '%s\n' "$postinst" | grep -q '/etc/init.d/oxidns restart'; then
+	ok "postinst restarts the service after an upgrade"
+else
+	fail "postinst does not restart the service (the old inode keeps running)"
+fi
+
 # --- 4. OpenWrt naming rules --------------------------------------------------
 
 section "naming rules"
@@ -321,7 +359,15 @@ fi
 #
 # Comments are stripped first: this Makefile *mentions* those paths on purpose,
 # to explain why it does not ship them.
-body="$(grep -v '^[[:space:]]*#' "$MAKE")"
+#
+# Package hooks are stripped too. postinst *calls* /etc/init.d/oxidns to restart
+# the service after an upgrade — that is a reference, not a claim on the path.
+body="$(awk '
+	/^define Package\/[A-Za-z0-9_-]+\/(postinst|prerm|postrm)$/ { skip = 1; next }
+	skip && /^endef$/ { skip = 0; next }
+	skip { next }
+	{ print }
+' "$MAKE" | grep -v '^[[:space:]]*#')"
 
 LUCI_PATHS="/etc/init.d/oxidns /etc/config/oxidns /usr/share/oxidns/targets.json"
 collide=""

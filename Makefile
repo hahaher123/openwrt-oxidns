@@ -34,7 +34,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=oxidns
 PKG_VERSION:=1.7.1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Upstream publishes no source tarball asset, so we use the GitHub tag
 # archive. Top level directory inside the archive is "oxidns-<version>",
@@ -141,6 +141,28 @@ endef
 
 define Package/oxidns/conffiles
 /etc/oxidns/config.yaml
+endef
+
+# 升级后重启服务。
+#
+# apk/opkg 只替换 /usr/bin/oxidns，正在运行的进程继续持有已删除的旧 inode ——
+# 表现就是「装了新版本，但行为一点没变」。2026-11-12 从 1.6.1 升 1.7.1 时实测踩到：
+#   /proc/<pid>/exe -> /usr/bin/oxidns (deleted)
+# 进程带着旧 inode 又跑了近一天，直到手动 restart 才真正切到 1.7.1。
+#
+# 两个判断不能省：
+#   1. IPKG_INSTROOT 非空 = 在镜像里安装（buildroot / imagebuilder），
+#      此时不能去动宿主机的 init 系统。
+#   2. 只在服务正在运行时重启。服务脚本由 luci-app-oxidns 提供；只装了内核包、
+#      或用户故意停用了服务的场景，postinst 不应该把进程拉起来 —— 那会改变
+#      用户明确表达过的状态。
+define Package/oxidns/postinst
+#!/bin/sh
+[ -n "$${IPKG_INSTROOT:-}" ] && exit 0
+if [ -x /etc/init.d/oxidns ] && pidof oxidns >/dev/null 2>&1; then
+	/etc/init.d/oxidns restart >/dev/null 2>&1 || true
+fi
+exit 0
 endef
 
 # --- prepare -----------------------------------------------------------------
