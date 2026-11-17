@@ -135,8 +135,10 @@ sha256_of() {
 version="${1:-}"
 if [ -z "$version" ]; then
 	printf 'Querying the latest %s release...\n' "$UPSTREAM_REPO"
-	fetch "https://api.github.com/repos/$UPSTREAM_REPO/releases/latest" "$WORK/release.json"
-	version="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' "$WORK/release.json" | head -n1)"
+	# Uses git ls-remote, NOT the releases/latest REST endpoint: anonymous API
+	# calls are capped at 60/hour per shared Actions runner IP and returned
+	# 403 on 2026-11-16. See scripts/latest-upstream-version.sh.
+	version="$(sh "$REPO_ROOT/scripts/latest-upstream-version.sh" "$UPSTREAM_REPO")"
 	[ -n "$version" ] || { echo "could not determine the latest release tag" >&2; exit 1; }
 fi
 

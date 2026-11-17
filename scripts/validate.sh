@@ -527,6 +527,37 @@ else
 	fail "validate.sh downloads without --retry (a CDN 504 would fail validation)"
 fi
 
+# 2026-11-16: the version probe must NOT use the anonymous releases/latest API.
+# Shared Actions runner IPs hit the 60/hour cap and returned 403, going red for
+# no upstream change. Both callers must use the git ls-remote helper instead.
+# Strip comments first, otherwise this assertion's own explanatory text and the
+# callers' comments would match (same self-match trap the fetch() assertions
+# avoid by slicing out the function body).
+api_probe_calls="$(
+	cat scripts/sync-upstream.sh scripts/validate.sh \
+		| sed -e 's/^[[:space:]]*#.*//' -e 's/[[:space:]]#.*//' \
+		| grep -c 'api[.]github[.]com/.*/releases/latest' || true
+)"
+if [ "$api_probe_calls" -eq 0 ]; then
+	ok "no caller uses the rate-limited releases/latest API"
+else
+	fail "a caller still uses the releases/latest API ($api_probe_calls call(s); 403 rate limit will red the probe)"
+fi
+
+if [ -f scripts/latest-upstream-version.sh ] \
+	&& grep -q 'git ls-remote' scripts/latest-upstream-version.sh \
+	&& grep -q 'latest-upstream-version.sh' scripts/sync-upstream.sh scripts/validate.sh; then
+	ok "version probe uses git ls-remote via shared helper (no token, no API quota)"
+else
+	fail "version probe helper missing or not wired into both callers"
+fi
+
+if grep -qE 'grep -E .\^v\[0-9\]' scripts/latest-upstream-version.sh; then
+	ok "version helper filters out pre-release tags"
+else
+	fail "version helper may pick a pre-release tag (no strict vX.Y.Z filter)"
+fi
+
 # --- 7. upstream consistency --------------------------------------------------
 
 section "upstream consistency"
@@ -617,9 +648,10 @@ else
 		fail "could not download $WEBUI_URL_RESOLVED/$WEBUI_ARCHIVE ($(cat "$WORK/dl-webui.err" 2>/dev/null))"
 	fi
 
-	# releases API: report how far behind the package is (informational)
-	if fetch "https://api.github.com/repos/$UPSTREAM_REPO/releases/latest" "$WORK/release.json" 2>/dev/null; then
-		latest="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' "$WORK/release.json" | head -n1)"
+	# Latest upstream tag: report how far behind the package is (informational).
+	# Uses git ls-remote instead of the releases/latest REST API - anonymous API
+	# calls are capped at 60/hour per shared Actions runner IP (403 on 2026-11-16).
+	if latest="$(sh scripts/latest-upstream-version.sh "$UPSTREAM_REPO" 2>/dev/null)"; then
 		if [ "$latest" = "$PKG_VERSION" ]; then
 			ok "package tracks the latest upstream release ($latest)"
 		else
